@@ -243,6 +243,8 @@ Traversal runs in a background worker; duplicate hashing and verification use bo
 
 Copyright (c) 2026 Chris Field
 
+The application's code is licensed under the [MIT License](LICENSE). Third-party artwork retains its separate license described below.
+
 The main window's bottom status bar shows the app's build version and copyright notice on every page.
 
 ## Icon attribution
