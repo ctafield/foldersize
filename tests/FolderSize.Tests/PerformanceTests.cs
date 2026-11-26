@@ -13,6 +13,41 @@ public sealed class PerformanceTests(ITestOutputHelper output)
 {
     [Fact]
     [Trait("Category", "Performance")]
+    public void FourThousandSmallDuplicateCandidatesBenchmark()
+    {
+        using var folder = new TestFolder();
+        var content = new byte[1024];
+        for (var group = 0; group < 40; group++)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(content, group);
+            var dir = Path.Combine(folder.Root, "one", "two", group.ToString("D2"));
+            Directory.CreateDirectory(dir);
+            for (var copy = 0; copy < 100; copy++)
+                File.WriteAllBytes(Path.Combine(dir, copy.ToString("D4")), content);
+        }
+        var scan = new FolderScanner().Scan(folder.Root, true);
+        var finder = new DuplicateFinder(new WindowsFileAccess());
+        finder.Find(scan);
+        var samples = new List<(double Milliseconds, long Allocated)>();
+        for (var run = 0; run < 3; run++)
+        {
+            var before = GC.GetTotalAllocatedBytes(true);
+            var timer = Stopwatch.StartNew();
+            var result = finder.Find(scan);
+            timer.Stop();
+            var allocated = GC.GetTotalAllocatedBytes(true) - before;
+            Assert.Equal(40, result.Groups.Count);
+            Assert.All(result.Groups, group => Assert.Equal(100, group.Files.Count));
+            Assert.Empty(result.Issues);
+            samples.Add((timer.Elapsed.TotalMilliseconds, allocated));
+        }
+        var median = samples.OrderBy(sample => sample.Milliseconds).ElementAt(1);
+        output.WriteLine($"4,000-file duplicate discovery (warm-cache median of 3): {median.Milliseconds:F1} ms");
+        output.WriteLine($"Managed allocation during median run: {median.Allocated / 1048576d:F2} MiB");
+    }
+
+    [Fact]
+    [Trait("Category", "Performance")]
     public Task HundredThousandFilesRemainVirtualizedAndCancellable() => Sta.Run(async () =>
     {
         using var folder = new TestFolder();

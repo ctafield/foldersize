@@ -8,10 +8,12 @@ namespace FolderSize.Core;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsFileAccess : IFileAccess
 {
+    public bool SupportsConcurrentReads => true;
+
     public FileLease Open(string path)
     {
         EnsureNoLinks(path);
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536,
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1,
             FileOptions.SequentialScan);
         try
         {

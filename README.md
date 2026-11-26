@@ -22,7 +22,7 @@ Use Windows 11 x64, or Windows 10 22H2 x64 with the applicable Windows servicing
 
 ### Windows installer
 
-The **Windows installer** GitHub Actions workflow runs on pushes, pull requests, and manual dispatch. Download the `FolderSize-win-x64-installer` artifact from a successful run, extract it, and run `FolderSize-<version>-win-x64-Setup.exe`.
+The **Windows installer** GitHub Actions workflow runs only when started manually using **Actions > Windows installer > Run workflow**. Pushes, tags, and pull requests do not trigger it. Download the `FolderSize-win-x64-installer` artifact from a successful run, extract it, and run `FolderSize-<version>-win-x64-Setup.exe`.
 
 The installer bundles the .NET Desktop Runtime, installs for the current user under `%LOCALAPPDATA%\Programs\FolderSize` by default, creates a Start menu shortcut, and registers **Scan with FolderSize** for folders and folder backgrounds. No administrator access or separate .NET installation is needed. On Windows 11, the Explorer command appears under **Show more options**.
 
@@ -113,6 +113,7 @@ Load saved rules using the preset dropdown. Enter a preset name and select **Sav
 
 - Select **Duplicates > Find duplicates** after a complete scan. This uses the same folder and recursion scope as the scan, not any subsequently edited path/toggle.
 - Candidates are grouped by length. For large files, SHA-256 fingerprints of three 4 KiB samples (beginning, middle, and end) first rule out obvious differences. Only matching sample groups proceed to full streamed SHA-256 hashing and byte-for-byte verification. Files of 12 KiB or less are hashed directly without an extra sampling pass. Samples only reject candidates; they never establish equality. File identities prevent hard links to the same underlying file being counted as independent copies.
+- Hashing and independent verification groups use up to eight concurrent readers (limited by logical processor count). Reference files stay locked during group verification; small reference contents are buffered once rather than reread for every copy. Discovery order and hard-link handling stay deterministic. No persistent hashes are trusted across scans.
 - Duplicate results show full paths, group numbers, copy counts, and extra logical bytes. These bytes are **not guaranteed recoverable disk space**.
 - All copies except the first result in each group are selected automatically using the **Recycle** checkboxes. The first is based on discovery order, not file age. Review the selection before recycling; keep at least one file in every group.
 - **Invert selection** toggles every duplicate file's checkbox, including files outside the visible rows. **Clear selection** unchecks everything. Inversion can select an entire group; recycling remains blocked until at least one copy per group is unchecked.
@@ -154,7 +155,7 @@ dotnet test tests\FolderSize.Tests -c Release --filter "Category!=Performance&Ca
 # Real Shell integration: recycles one tiny, uniquely named disposable fixture file
 dotnet test tests\FolderSize.Tests -c Release --filter "Category=RecycleIntegration"
 
-# Creates/removes 100,000 temporary files and reports local performance measurements
+# Creates/removes large scan and duplicate fixtures and reports local performance measurements
 dotnet test tests\FolderSize.Tests -c Release --filter "Category=Performance" --logger "console;verbosity=detailed"
 
 # Complete suite, including both opt-in categories above
@@ -163,7 +164,18 @@ dotnet test tests\FolderSize.Tests -c Release
 
 WPF tests display temporary windows and require an interactive Windows desktop. Tests create uniquely named `FolderSize-tests-*` folders in the current user's temporary directory and clean them afterward. The recycle integration fixture remains in the Windows Recycle Bin. Performance depends on storage, cache state, antivirus, directory layout, and file count; duplicate discovery also depends on total candidate content size.
 
-One local Release run with 100,000 one-byte files in a single directory measured 0.328 seconds for scanning plus initial UI display, 16 realized list rows, a 153 ms maximum UI timer gap, and 2.2 ms in-flight traversal cancellation. Peak working set was 230 MiB **for the testhost**, including WPF and fixture creation, not the standalone application's baseline. The published executable was separately launched and exercised through Windows UI Automation. These are local observations, not performance guarantees.
+One local Release run with 100,000 one-byte files in a single directory measured 0.315 seconds for scanning plus initial UI display, 12 realized list rows, a 139.6 ms maximum UI timer gap, and 4.2 ms in-flight traversal cancellation. Peak working set was 219.5 MiB **for the testhost**, including WPF and fixture creation, not the standalone application's baseline.
+
+Controlled core-only benchmarks on the same local fixtures, using a warm-up and the median of three runs, measured these changes:
+
+| Workload | Before | After | Managed allocation before / after |
+| --- | ---: | ---: | ---: |
+| Scan 100,000 immediate files | 100.1 ms | 31.2 ms | 57.70 / 14.97 MiB |
+| Scan 100,000 files in 250 subfolders | 87.5 ms | 60.4 ms | 58.02 / 14.41 MiB |
+| Find 40 duplicate groups among 4,000 1 KiB files | 15,233.4 ms | 2,333.3 ms | 588.96 / 64.80 MiB |
+| Find 32 duplicate groups among 96 1 MiB files | 429.4 ms | 78.8 ms | 7.98 / 1.64 MiB |
+
+Traversal consumes enumeration metadata directly without allocating a `FileInfo` per entry, using a 64 KiB enumeration buffer. File-content reads use pooled buffers without an additional per-stream 64 KiB buffer. These are local, warm-cache observations, not cold-disk measurements or performance guarantees. Disk type, antivirus, path depth, cache state, and other activity affect results; concurrent reads can be less beneficial on rotational or network storage.
 
 ### Portable framework-dependent ZIP
 
@@ -180,7 +192,7 @@ This intentionally does not bundle .NET, trim WPF, or publish a single-file exec
 - `src\FolderSize.App`: WPF view/view model, virtualized grids, bounded custom-drawn treemap, and Shell recycling integration.
 - `tests\FolderSize.Tests`: scan/error tests, duplicate/deletion safeguards, layout invariants, WPF interaction, real recycling, and a 100,000-file performance fixture.
 
-Traversal and duplicate hashing each use a single background worker, bounded file handles, and streamed reads. The file tree and duplicate metadata stay in memory, so memory consumption still grows with entry count. There is no MFT indexing, persistent cache, live watching, allocated-size accounting, permanent deletion, or automatic cleanup.
+Traversal runs in a background worker; duplicate hashing and verification use bounded concurrency, at most 16 open file leases, and streamed reads. Custom `IFileAccess` implementations remain sequential unless they opt into `SupportsConcurrentReads`. The file tree and duplicate metadata stay in memory, so memory consumption still grows with entry count. There is no MFT indexing, persistent cache, live watching, allocated-size accounting, permanent deletion, or automatic cleanup.
 
 ## Icon attribution
 

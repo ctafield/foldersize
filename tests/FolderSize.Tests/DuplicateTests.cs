@@ -1,10 +1,77 @@
 using System.IO;
+using System.Collections.Concurrent;
 using FolderSize.Core;
 
 namespace FolderSize.Tests;
 
 public sealed class DuplicateTests
 {
+    [Fact]
+    public void SmallDuplicateGroupsDoNotReopenOrRereadTheReferenceForEveryCopy()
+    {
+        using var folder = new TestFolder();
+        const string content = "matching contents";
+        for (var i = 0; i < 32; i++) folder.Write(i.ToString(), content);
+        var access = new CountingAccess();
+        var result = new DuplicateFinder(access).Find(new FolderScanner().Scan(folder.Root, true));
+        Assert.Equal(32, Assert.Single(result.Groups).Files.Count);
+        Assert.Empty(result.Issues);
+        Assert.All(access.OpenCounts.Values, count => Assert.Equal(2, count));
+        Assert.Equal(2L * 32 * content.Length, access.ReadBytes.Values.Sum());
+        Assert.Equal(0, access.ActiveLeases);
+    }
+
+    [Fact]
+    public void ConcurrentReadsAreBoundedAndPreserveDiscoveryOrderAndHardLinkHandling()
+    {
+        using var folder = new TestFolder();
+        for (var group = 0; group < 12; group++)
+            for (var copy = 0; copy < 4; copy++)
+                folder.Write($"{group:D2}-{copy}", $"contents-{group:D2}");
+        Assert.True(TestFolder.CreateHardLink(Path.Combine(folder.Root, "hardlink"), Path.Combine(folder.Root, "00-0"), 0));
+        var scan = new FolderScanner().Scan(folder.Root, true);
+        var expected = new DuplicateFinder(new CountingAccess()).Find(scan);
+        var access = new CountingAccess(concurrent: true);
+        var actual = new DuplicateFinder(access).Find(scan);
+        Assert.Equal(expected.Groups.SelectMany(group => group.Files).Select(file => file.Path),
+            actual.Groups.SelectMany(group => group.Files).Select(file => file.Path));
+        Assert.Equal(expected.Issues, actual.Issues);
+        Assert.InRange(access.MaximumLeases, 1, 2 * Math.Min(Environment.ProcessorCount, 8));
+        Assert.Equal(0, access.ActiveLeases);
+    }
+
+    [Fact]
+    public void CancellationDuringConcurrentReadsReleasesEveryLease()
+    {
+        using var folder = new TestFolder();
+        for (var i = 0; i < 32; i++) folder.Write(i.ToString(), "same");
+        using var source = new CancellationTokenSource();
+        var access = new CountingAccess(concurrent: true, onOpen: source.Cancel);
+        var scan = new FolderScanner().Scan(folder.Root, true);
+        Assert.Throws<OperationCanceledException>(() =>
+            new DuplicateFinder(access).Find(scan, cancellationToken: source.Token));
+        Assert.Equal(0, access.ActiveLeases);
+    }
+
+    [Fact]
+    public void ExactVerificationPartitionsFilesChangedAfterHashingEvenWhenTheirStampsMatch()
+    {
+        using var folder = new TestFolder();
+        var original = folder.Write("a", "same");
+        var changed = new[] { folder.Write("b", "same"), folder.Write("c", "same") };
+        var access = new CountingAccess(beforeOpen: (path, count) =>
+        {
+            if (count != 2 || path == original) return;
+            var modified = File.GetLastWriteTimeUtc(path);
+            File.WriteAllText(path, "diff");
+            File.SetLastWriteTimeUtc(path, modified);
+        });
+        var result = new DuplicateFinder(access).Find(new FolderScanner().Scan(folder.Root, true));
+        Assert.Equal(changed.Order(), Assert.Single(result.Groups).Files.Select(file => file.Path).Order());
+        Assert.Empty(result.Issues);
+        Assert.Equal(0, access.ActiveLeases);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(4192256)]
@@ -191,18 +258,34 @@ public sealed class DuplicateTests
     private static DuplicateResult Find(TestFolder folder, bool recursive = true) =>
         new DuplicateFinder(new WindowsFileAccess()).Find(new FolderScanner().Scan(folder.Root, recursive));
 
-    private sealed class CountingAccess : IFileAccess
+    private sealed class CountingAccess(bool concurrent = false, Action? onOpen = null,
+        Action<string, int>? beforeOpen = null) : IFileAccess
     {
-        public Dictionary<string, long> ReadBytes { get; } = [];
+        private readonly object gate = new();
+        public bool SupportsConcurrentReads => concurrent;
+        public int ActiveLeases { get; private set; }
+        public int MaximumLeases { get; private set; }
+        public ConcurrentDictionary<string, long> ReadBytes { get; } = new(StringComparer.Ordinal);
+        public ConcurrentDictionary<string, int> OpenCounts { get; } = new(StringComparer.Ordinal);
         public FileLease Open(string path)
         {
+            var openCount = OpenCounts.AddOrUpdate(path, 1, (_, previous) => previous + 1);
+            beforeOpen?.Invoke(path, openCount);
             var lease = new WindowsFileAccess().Open(path);
             ReadBytes.TryAdd(path, 0);
-            return new(new CountingStream(lease.Stream, count => ReadBytes[path] += count), lease.Stamp);
+            lock (gate)
+            {
+                ActiveLeases++;
+                MaximumLeases = Math.Max(MaximumLeases, ActiveLeases);
+            }
+            onOpen?.Invoke();
+            return new(new CountingStream(lease.Stream,
+                count => ReadBytes.AddOrUpdate(path, count, (_, previous) => previous + count),
+                () => { lock (gate) ActiveLeases--; }), lease.Stamp);
         }
     }
 
-    private sealed class CountingStream(Stream inner, Action<int> onRead) : Stream
+    private sealed class CountingStream(Stream inner, Action<int> onRead, Action? onDispose = null) : Stream
     {
         public override bool CanRead => inner.CanRead;
         public override bool CanSeek => inner.CanSeek;
@@ -227,7 +310,11 @@ public sealed class DuplicateTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         protected override void Dispose(bool disposing)
         {
-            if (disposing) inner.Dispose();
+            if (disposing)
+            {
+                inner.Dispose();
+                onDispose?.Invoke();
+            }
             base.Dispose(disposing);
         }
     }

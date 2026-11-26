@@ -23,6 +23,7 @@ public sealed class FileLease(Stream stream, FileStamp stamp) : IDisposable
 public interface IFileAccess
 {
     FileLease Open(string path);
+    bool SupportsConcurrentReads => false;
 }
 
 public interface IRecycler
@@ -33,6 +34,10 @@ public interface IRecycler
 public sealed class DuplicateFinder(IFileAccess access)
 {
     private const int SampleSize = 4096;
+    private int Concurrency => access.SupportsConcurrentReads ? Math.Min(Environment.ProcessorCount, 8) : 1;
+
+    private readonly record struct HashInput(string Path, long Length, DateTime LastWriteUtc, FileStamp? ExpectedStamp);
+    private readonly record struct HashResult(DuplicateFile? File, string? Hash, FileIssue? Issue);
 
     public DuplicateResult Find(ScanResult scan, IProgress<WorkProgress>? progress = null,
         CancellationToken cancellationToken = default)
@@ -41,44 +46,34 @@ public sealed class DuplicateFinder(IFileAccess access)
         var identities = new HashSet<string>(StringComparer.Ordinal);
         var buckets = new Dictionary<(long Length, string Hash), List<DuplicateFile>>();
         var groups = new List<DuplicateGroup>();
-        long processed = 0, bytes = 0;
-        var timer = Stopwatch.StartNew();
-        foreach (var candidates in scan.Root.Files().GroupBy(file => file.Size).Where(group => group.Skip(1).Any()))
+        cancellationToken.ThrowIfCancellationRequested();
+        var candidates = scan.Root.Files().GroupBy(file => file.Size).Where(group => group.Count() > 1)
+            .SelectMany(group => group)
+            .Select(file => new HashInput(file.FullPath, file.Size, file.LastWriteUtc, null)).ToArray();
+        var sampled = HashCandidates(candidates, sample: true, "Sampling candidates (file sizes examined)",
+            progress, cancellationToken);
+        foreach (var result in sampled)
         {
-            foreach (var candidate in candidates)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result.Issue is { } issue)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var path = candidate.FullPath;
-                try
-                {
-                    using var lease = access.Open(path);
-                    if (lease.Stamp.Length != candidate.Size || lease.Stamp.LastWriteUtc != candidate.LastWriteUtc)
-                        throw new IOException("File changed since the scan; scan again.");
-                    if (!identities.Add(lease.Stamp.Identity))
-                    {
-                        issues.Add(new(path, "Skipped hard link to an already examined file."));
-                        continue;
-                    }
-                    var hash = SampleHash(lease.Stream, lease.Stamp.Length, cancellationToken);
-                    var key = (lease.Stamp.Length, hash);
-                    if (!buckets.TryGetValue(key, out var matches)) buckets[key] = matches = [];
-                    matches.Add(new(path, lease.Stamp));
-                    processed++;
-                    bytes += lease.Stamp.Length;
-                }
-                catch (Exception ex) when (FileErrors.IsExpected(ex))
-                {
-                    issues.Add(new(path, ex.Message));
-                }
-                if (timer.ElapsedMilliseconds >= 100)
-                {
-                    progress?.Report(new(processed, bytes, "Sampling candidates (file sizes examined)"));
-                    timer.Restart();
-                }
+                issues.Add(issue);
+                continue;
             }
+            if (result.File is not { } file || result.Hash is not { } hash)
+                throw new InvalidOperationException("A hash worker did not return a result.");
+            // Reduce in discovery order so parallel reads never change which hard-link path is kept.
+            if (!identities.Add(file.Stamp.Identity))
+            {
+                issues.Add(new(file.Path, "Skipped hard link to an already examined file."));
+                continue;
+            }
+            var key = (file.Stamp.Length, hash);
+            if (!buckets.TryGetValue(key, out var matches)) buckets[key] = matches = [];
+            matches.Add(file);
         }
         var fullBuckets = new List<List<DuplicateFile>>();
-        processed = bytes = 0;
+        var fullCandidates = new List<HashInput>();
         foreach (var samples in buckets.Values.Where(items => items.Count > 1))
         {
             if (samples[0].Stamp.Length <= SampleSize * 3)
@@ -86,63 +81,153 @@ public sealed class DuplicateFinder(IFileAccess access)
                 fullBuckets.Add(samples);
                 continue;
             }
-            var hashes = new Dictionary<string, List<DuplicateFile>>(StringComparer.Ordinal);
             foreach (var candidate in samples)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                try
-                {
-                    using var lease = OpenVerified(access, candidate);
-                    var hash = Hash(lease.Stream, cancellationToken);
-                    if (!hashes.TryGetValue(hash, out var matches)) hashes[hash] = matches = [];
-                    matches.Add(candidate);
-                    processed++;
-                    bytes += lease.Stamp.Length;
-                }
-                catch (Exception ex) when (FileErrors.IsExpected(ex))
-                {
-                    issues.Add(new(candidate.Path, ex.Message));
-                }
-                if (timer.ElapsedMilliseconds >= 100)
-                {
-                    progress?.Report(new(processed, bytes, "Hashing sample matches"));
-                    timer.Restart();
-                }
-            }
-            fullBuckets.AddRange(hashes.Values.Where(items => items.Count > 1));
+                fullCandidates.Add(new(candidate.Path, candidate.Stamp.Length, candidate.Stamp.LastWriteUtc, candidate.Stamp));
         }
-        foreach (var bucket in fullBuckets)
+        var hashed = HashCandidates(fullCandidates, sample: false, "Hashing sample matches", progress, cancellationToken);
+        var fullHashes = new Dictionary<(long Length, string Hash), List<DuplicateFile>>();
+        foreach (var result in hashed)
         {
-            var partitions = new List<List<DuplicateFile>>();
-            foreach (var candidate in bucket)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result.Issue is { } issue)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                try
-                {
-                    using var candidateLease = OpenVerified(access, candidate);
-                    List<DuplicateFile>? match = null;
-                    foreach (var partition in partitions)
-                    {
-                        using var reference = OpenVerified(access, partition[0]);
-                        if (Equal(candidateLease.Stream, reference.Stream, cancellationToken))
-                        {
-                            match = partition;
-                            break;
-                        }
-                    }
-                    if (match is null) partitions.Add([candidate]);
-                    else match.Add(candidate);
-                }
-                catch (Exception ex) when (FileErrors.IsExpected(ex))
-                {
-                    issues.Add(new(candidate.Path, ex.Message));
-                }
+                issues.Add(issue);
+                continue;
             }
-            groups.AddRange(partitions.Where(items => items.Count > 1).Select(items => new DuplicateGroup(items)));
-            progress?.Report(new(processed, bytes, "Verifying exact matches"));
+            if (result.File is not { } file || result.Hash is not { } hash)
+                throw new InvalidOperationException("A hash worker did not return a result.");
+            var key = (file.Stamp.Length, hash);
+            if (!fullHashes.TryGetValue(key, out var matches)) fullHashes[key] = matches = [];
+            matches.Add(file);
         }
+        fullBuckets.AddRange(fullHashes.Values.Where(items => items.Count > 1));
+        progress?.Report(new(0, 0, "Verifying exact matches"));
+        var verified = new DuplicateResult[fullBuckets.Count];
+        Parallel.For(0, fullBuckets.Count, new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = Concurrency
+        }, index => verified[index] = VerifyBucket(fullBuckets[index], cancellationToken));
+        foreach (var result in verified)
+        {
+            groups.AddRange(result.Groups);
+            issues.AddRange(result.Issues);
+        }
+        progress?.Report(new(fullBuckets.Sum(bucket => (long)bucket.Count),
+            fullBuckets.Sum(bucket => bucket[0].Stamp.Length * bucket.Count), "Verifying exact matches"));
         cancellationToken.ThrowIfCancellationRequested();
         return new(groups.OrderByDescending(group => group.ExtraBytes).ToArray(), issues);
+    }
+
+    private HashResult[] HashCandidates(IReadOnlyList<HashInput> candidates, bool sample, string phase,
+        IProgress<WorkProgress>? progress, CancellationToken token)
+    {
+        var results = new HashResult[candidates.Count];
+        var gate = new object();
+        var timer = Stopwatch.StartNew();
+        long processed = 0, bytes = 0;
+        Parallel.For(0, candidates.Count, new ParallelOptions
+        {
+            CancellationToken = token,
+            MaxDegreeOfParallelism = Concurrency
+        }, index =>
+        {
+            var candidate = candidates[index];
+            try
+            {
+                using var lease = access.Open(candidate.Path);
+                if (candidate.ExpectedStamp is { } expected && lease.Stamp != expected)
+                    throw new IOException($"File changed or was replaced: {candidate.Path}");
+                if (lease.Stamp.Length != candidate.Length || lease.Stamp.LastWriteUtc != candidate.LastWriteUtc)
+                    throw new IOException("File changed since the scan; scan again.");
+                var hash = sample ? SampleHash(lease.Stream, lease.Stamp.Length, token) : Hash(lease.Stream, token);
+                results[index] = new(new(candidate.Path, lease.Stamp), hash, null);
+                if (progress is not null)
+                {
+                    lock (gate)
+                    {
+                        processed++;
+                        bytes += lease.Stamp.Length;
+                        if (timer.ElapsedMilliseconds >= 100)
+                        {
+                            progress.Report(new(processed, bytes, phase));
+                            timer.Restart();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (FileErrors.IsExpected(ex))
+            {
+                results[index] = new(null, null, new(candidate.Path, ex.Message));
+            }
+        });
+        progress?.Report(new(processed, bytes, phase));
+        return results;
+    }
+
+    private DuplicateResult VerifyBucket(List<DuplicateFile> bucket, CancellationToken token)
+    {
+        var groups = new List<DuplicateGroup>();
+        var issues = new List<FileIssue>();
+        var remaining = bucket;
+        while (remaining.Count > 0)
+        {
+            token.ThrowIfCancellationRequested();
+            var keeper = remaining[0];
+            var unmatched = new List<DuplicateFile>();
+            byte[]? referenceBuffer = null, candidateBuffer = null;
+            try
+            {
+                using var reference = OpenVerified(access, keeper);
+                // Keep the reference lease locked while reusing its small-file snapshot.
+                if (keeper.Stamp.Length <= SampleSize * 3)
+                {
+                    referenceBuffer = ArrayPool<byte>.Shared.Rent(65536);
+                    candidateBuffer = ArrayPool<byte>.Shared.Rent(65536);
+                    reference.Stream.Position = 0;
+                    if (ReadBlock(reference.Stream, referenceBuffer, token) != keeper.Stamp.Length)
+                        throw new IOException($"File changed or was replaced: {keeper.Path}");
+                }
+                var matches = new List<DuplicateFile> { keeper };
+                for (var index = 1; index < remaining.Count; index++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var candidate = remaining[index];
+                    try
+                    {
+                        using var lease = OpenVerified(access, candidate);
+                        bool equal;
+                        if (referenceBuffer is not null && candidateBuffer is not null)
+                        {
+                            lease.Stream.Position = 0;
+                            var read = ReadBlock(lease.Stream, candidateBuffer, token);
+                            equal = read == keeper.Stamp.Length &&
+                                referenceBuffer.AsSpan(0, read).SequenceEqual(candidateBuffer.AsSpan(0, read));
+                        }
+                        else equal = Equal(reference.Stream, lease.Stream, token);
+                        if (equal) matches.Add(candidate);
+                        else unmatched.Add(candidate);
+                    }
+                    catch (Exception ex) when (FileErrors.IsExpected(ex))
+                    {
+                        issues.Add(new(candidate.Path, ex.Message));
+                    }
+                }
+                if (matches.Count > 1) groups.Add(new(matches));
+            }
+            catch (Exception ex) when (FileErrors.IsExpected(ex))
+            {
+                issues.Add(new(keeper.Path, ex.Message));
+                unmatched.AddRange(remaining.GetRange(1, remaining.Count - 1));
+            }
+            finally
+            {
+                if (referenceBuffer is not null) ArrayPool<byte>.Shared.Return(referenceBuffer);
+                if (candidateBuffer is not null) ArrayPool<byte>.Shared.Return(candidateBuffer);
+            }
+            remaining = unmatched;
+        }
+        return new(groups, issues);
     }
 
     internal static FileLease OpenVerified(IFileAccess access, DuplicateFile file)
@@ -200,8 +285,8 @@ public sealed class DuplicateFinder(IFileAccess access)
             while (true)
             {
                 token.ThrowIfCancellationRequested();
-                var readA = ReadBlock(first, a);
-                var readB = ReadBlock(second, b);
+                var readA = ReadBlock(first, a, token);
+                var readB = ReadBlock(second, b, token);
                 if (readA != readB || !a.AsSpan(0, readA).SequenceEqual(b.AsSpan(0, readB))) return false;
                 if (readA == 0) return true;
             }
@@ -213,11 +298,12 @@ public sealed class DuplicateFinder(IFileAccess access)
         }
     }
 
-    private static int ReadBlock(Stream stream, byte[] buffer)
+    private static int ReadBlock(Stream stream, byte[] buffer, CancellationToken token)
     {
         var count = 0;
         while (count < buffer.Length)
         {
+            token.ThrowIfCancellationRequested();
             var read = stream.Read(buffer, count, buffer.Length - count);
             if (read == 0) break;
             count += read;

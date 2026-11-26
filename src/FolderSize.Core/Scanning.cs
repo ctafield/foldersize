@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Enumeration;
 
 namespace FolderSize.Core;
 
@@ -57,7 +58,7 @@ public sealed class FolderScanner
         var options = new EnumerationOptions
         {
             RecurseSubdirectories = false, IgnoreInaccessible = false,
-            AttributesToSkip = 0, ReturnSpecialDirectories = false
+            AttributesToSkip = 0, ReturnSpecialDirectories = false, BufferSize = 65536
         };
         while (pending.TryPop(out var work))
         {
@@ -65,44 +66,52 @@ public sealed class FolderScanner
             var node = work.Node;
             if (work.Aggregate)
             {
-                node.Size = node.Children.Sum(child => child.Size);
-                node.HasErrors |= node.Children.Any(child => child.HasErrors);
+                foreach (var child in node.Children)
+                {
+                    node.Size = checked(node.Size + child.Size);
+                    node.HasErrors |= child.HasErrors;
+                }
                 continue;
             }
             pending.Push((node, true));
             node.IsScanned = true;
             try
             {
-                foreach (var entry in new DirectoryInfo(node.FullPath).EnumerateFileSystemInfos("*", options))
+                var entries = new FileSystemEnumerable<ScanNode?>(node.FullPath, (ref FileSystemEntry entry) =>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     try
                     {
                         if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
                         {
-                            issues.Add(new(entry.FullName, "Skipped junction or symbolic link."));
+                            issues.Add(new(entry.ToFullPath(), "Skipped junction or symbolic link."));
                             node.HasErrors = true;
-                            continue;
+                            return null;
                         }
-                        var child = new ScanNode(entry.Name, node, entry is DirectoryInfo)
+                        return new ScanNode(entry.FileName.ToString(), node, entry.IsDirectory)
                         {
-                            LastWriteUtc = entry.LastWriteTimeUtc
+                            LastWriteUtc = entry.LastWriteTimeUtc.UtcDateTime,
+                            Size = entry.IsDirectory ? 0 : entry.Length,
+                            IsScanned = !entry.IsDirectory
                         };
-                        if (entry is FileInfo file)
-                        {
-                            child.Size = file.Length;
-                            child.IsScanned = true;
-                            count++;
-                            bytes += child.Size;
-                        }
-                        node.Children.Add(child);
-                        if (child.IsDirectory && recursive) pending.Push((child, false));
                     }
                     catch (Exception ex) when (FileErrors.IsExpected(ex))
                     {
-                        issues.Add(new(entry.FullName, ex.Message));
+                        issues.Add(new(entry.ToFullPath(), ex.Message));
                         node.HasErrors = true;
+                        return null;
                     }
+                }, options);
+                foreach (var child in entries)
+                {
+                    if (child is null) continue;
+                    if (!child.IsDirectory)
+                    {
+                        count++;
+                        bytes += child.Size;
+                    }
+                    node.Children.Add(child);
+                    if (child.IsDirectory && recursive) pending.Push((child, false));
                     if (firstReport || timer.ElapsedMilliseconds >= 100)
                     {
                         progress?.Report(new(count, bytes, "Scanning"));
