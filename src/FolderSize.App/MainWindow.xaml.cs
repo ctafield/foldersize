@@ -1,5 +1,7 @@
 ﻿using System.ComponentModel;
+using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -18,13 +20,14 @@ public partial class MainWindow : Window
     private bool startScanningOnOpen;
     private readonly WindowPlacement? windowPlacement;
     private readonly FileOpener fileOpener;
+    private readonly Action<string> copyToClipboard;
     public MainViewModel Model { get; }
 
     public MainWindow() : this(new ThemeSettingsStore(), AppTheme.System) { }
 
     public MainWindow(ThemeSettingsStore settingsStore, AppTheme theme, bool openWithDoubleClick = true,
         FileOpener? fileOpener = null, MainViewModel? model = null, bool includeSubfolders = true,
-        bool startScanningOnOpen = true, WindowPlacement? windowPlacement = null)
+        bool startScanningOnOpen = true, WindowPlacement? windowPlacement = null, Action<string>? copyToClipboard = null)
     {
         this.settingsStore = settingsStore;
         this.openWithDoubleClick = openWithDoubleClick;
@@ -32,6 +35,7 @@ public partial class MainWindow : Window
         this.startScanningOnOpen = startScanningOnOpen;
         this.windowPlacement = windowPlacement;
         this.fileOpener = fileOpener ?? new FileOpener();
+        this.copyToClipboard = copyToClipboard ?? Clipboard.SetText;
         Model = model ?? new MainViewModel();
         Model.Recursive = includeSubfolders;
         InitializeComponent();
@@ -154,16 +158,17 @@ public partial class MainWindow : Window
         Map.SelectedNode = (UsageGrid.SelectedItem as UsageRow)?.Node;
     private async void UsageGrid_DoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (!Model.Idle) return;
+        if (!Model.Idle || e.ChangedButton != MouseButton.Left) return;
         if (ItemsControl.ContainerFromElement(UsageGrid, e.OriginalSource as DependencyObject) is DataGridRow { Item: UsageRow row })
         {
             if (row.Node.IsDirectory) await Model.NavigateAsync(row.Node);
-            else OpenFile(row.FullPath);
+            else if (openWithDoubleClick) OpenFile(row.FullPath);
         }
     }
     private void FileGrid_DoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (!Model.Idle || sender is not DataGrid grid || e.OriginalSource is not DependencyObject source) return;
+        if (!Model.Idle || !openWithDoubleClick || e.ChangedButton != MouseButton.Left ||
+            sender is not DataGrid grid || e.OriginalSource is not DependencyObject source) return;
         for (var element = source; element is not null && element != grid;
              element = element is Visual ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element))
         {
@@ -181,7 +186,7 @@ public partial class MainWindow : Window
     }
     private void OpenFile(string path)
     {
-        if (!openWithDoubleClick || !Model.Idle) return;
+        if (!Model.Idle) return;
         try { fileOpener.Open(path); }
         catch (Exception ex) when (FileErrors.IsExpected(ex) ||
                                    ex is Win32Exception or InvalidOperationException or ArgumentException or NotSupportedException)
@@ -190,6 +195,78 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
+
+    private void FileContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu) return;
+        if (!Model.Idle || menu.PlacementTarget is not DataGridRow row ||
+            row.Item is not (UsageRow or DuplicateRow))
+        {
+            menu.IsOpen = false;
+            return;
+        }
+        if (ItemsControl.ItemsControlFromItemContainer(row) is DataGrid grid) grid.SelectedItem = row.Item;
+        menu.Tag = row.Item;
+        var items = menu.Items.OfType<MenuItem>().ToArray();
+        foreach (var item in items) { item.IsEnabled = true; item.ToolTip = null; }
+        if (row.Item is UsageRow { Node.IsDirectory: true } folder)
+        {
+            items[0].IsEnabled = folder.Node.IsScanned;
+            items[^1].IsEnabled = folder.Node.IsScanned && !folder.Node.HasErrors;
+            if (!items[0].IsEnabled) items[0].ToolTip = "Scan this folder before opening it.";
+            if (!items[^1].IsEnabled)
+                items[^1].ToolTip = "Scan this folder recursively and resolve any Issues before recycling it.";
+        }
+    }
+
+    private static object? ContextItem(object sender) => sender is MenuItem item &&
+        ItemsControl.ItemsControlFromItemContainer(item) is ContextMenu menu ? menu.Tag : null;
+
+    private static string? ContextPath(object? item) => item switch
+    {
+        UsageRow row => row.FullPath,
+        DuplicateRow row => row.Path,
+        _ => null
+    };
+
+    private async void ContextOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (!Model.Idle) return;
+        var item = ContextItem(sender);
+        if (item is UsageRow { Node.IsDirectory: true } folder) await Model.NavigateAsync(folder.Node);
+        else if (ContextPath(item) is { } path) OpenFile(path);
+    }
+
+    private void ContextCopyName_Click(object sender, RoutedEventArgs e) => CopyContextPath(sender, filenameOnly: true);
+    private void ContextCopyPath_Click(object sender, RoutedEventArgs e) => CopyContextPath(sender, filenameOnly: false);
+
+    private void CopyContextPath(object sender, bool filenameOnly)
+    {
+        if (!Model.Idle || ContextPath(ContextItem(sender)) is not { } path) return;
+        try { copyToClipboard(filenameOnly ? Path.GetFileName(path) : path); }
+        catch (ExternalException ex)
+        {
+            MessageBox.Show(this, $"Could not copy to the clipboard:\n{ex.Message}", "Copy failed",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async void ContextRecycle_Click(object sender, RoutedEventArgs e)
+    {
+        if (!Model.CanFind) return;
+        var item = ContextItem(sender);
+        if (ContextPath(item) is not { } path) return;
+        var size = item switch { UsageRow row => row.Bytes, DuplicateRow row => row.File.Stamp.Length, _ => 0 };
+        var guidance = item is UsageRow { Node.IsDirectory: true }
+            ? "This folder and all of its contents will be moved to the Recycle Bin. Contents are rechecked against the scan."
+            : item is DuplicateRow
+                ? "A verified duplicate copy will be kept."
+                : "This file will be moved to the Recycle Bin. No duplicate copy is required or kept.";
+        if (!ConfirmRecycling([(path, size)], guidance + "\nLocal fixed drives only; permanent deletion is never used.")) return;
+        if (item is UsageRow rowItem) await Model.RecycleItemAsync(rowItem.Node);
+        else if (item is DuplicateRow duplicate) await Model.RecycleDuplicateAsync(duplicate);
+    }
+
     private async void UsageGrid_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && UsageGrid.SelectedItem is UsageRow row)

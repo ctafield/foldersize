@@ -4,7 +4,7 @@ using FolderSize.Core;
 
 namespace FolderSize.App;
 
-public sealed class ShellRecycler : IRecycler
+public sealed class ShellRecycler(bool allowDirectories = false) : IRecycler
 {
     public void Recycle(string path)
     {
@@ -12,7 +12,7 @@ public sealed class ShellRecycler : IRecycler
         var root = Path.GetPathRoot(path) ?? throw new IOException("Cannot determine the file volume.");
         if (new DriveInfo(root).DriveType != DriveType.Fixed)
             throw new IOException("Recycling is supported only on local fixed drives. File was not deleted.");
-        if ((File.GetAttributes(path) & FileAttributes.Directory) != 0)
+        if (!allowDirectories && (File.GetAttributes(path) & FileAttributes.Directory) != 0)
             throw new IOException("Only individual files can be recycled.");
 
         IFileOperation? operation = null;

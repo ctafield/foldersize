@@ -65,8 +65,10 @@ public sealed class FileRecyclingTests
         Assert.Empty(cancelled.Recycled);
     }
 
-    [Fact]
-    public Task ConfirmationShowsSelectionAndCanBeCancelledWithoutChangingFiles() => Sta.Run(async () =>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ConfirmationShowsSelectionAndCanBeCancelledWithoutChangingFiles(bool contextMenu) => Sta.Run(async () =>
     {
         using var folder = new TestFolder();
         var path = folder.Write("selected.txt", new string('x', 2048));
@@ -104,7 +106,17 @@ public sealed class FileRecyclingTests
                 catch (Exception ex) { handled.SetException(ex); }
                 finally { dialog?.Close(); }
             }));
-            ((Button)window.FindName("RecycleLargeFilesButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            if (contextMenu)
+            {
+                var grid = (DataGrid)window.FindName("LargeFilesGrid");
+                var row = Assert.IsType<DataGridRow>(grid.ItemContainerGenerator.ContainerFromIndex(0));
+                var menu = row.ContextMenu;
+                menu.PlacementTarget = row;
+                menu.IsOpen = true;
+                menu.Items.OfType<MenuItem>().Last().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                menu.IsOpen = false;
+            }
+            else ((Button)window.FindName("RecycleLargeFilesButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await handled.Task;
             Assert.True(File.Exists(path));
             Assert.True(window.Model.LargeFiles[0].Selected);
@@ -150,4 +162,62 @@ public sealed class FileRecyclingTests
     {
         public void Recycle(string path) => recycle(path);
     }
+
+    [Theory]
+    [InlineData("added")]
+    [InlineData("changed")]
+    [InlineData("missing")]
+    [InlineData("unscanned")]
+    public void FolderRecyclingRefusesChangedOrIncompleteContents(string change)
+    {
+        using var folder = new TestFolder();
+        var path = folder.Write(@"nested\file.txt", "original");
+        var scan = new FolderScanner().Scan(folder.Root, change != "unscanned");
+        var node = Assert.Single(scan.Root.Children);
+        if (change == "added") folder.Write(@"nested\new.txt", "new");
+        if (change == "changed") File.AppendAllText(path, "changed");
+        if (change == "missing") File.Delete(path);
+        var result = new FolderRecycling(new WindowsFileAccess(),
+            new CallbackRecycler(_ => Assert.Fail("Unsafe folder must not reach the recycler."))).Recycle(node);
+        Assert.Empty(result.Recycled);
+        Assert.NotEmpty(result.Issues);
+        Assert.True(Directory.Exists(node.FullPath));
+    }
+
+    [Fact]
+    public void CancelledFolderRecyclingNeverCallsTheRecycler()
+    {
+        using var folder = new TestFolder();
+        folder.Write(@"nested\file.txt", "original");
+        var scan = new FolderScanner().Scan(folder.Root, true);
+        using var source = new CancellationTokenSource();
+        source.Cancel();
+        var service = new FolderRecycling(new WindowsFileAccess(),
+            new CallbackRecycler(_ => Assert.Fail("Cancelled folder must not reach the recycler.")));
+        Assert.Throws<ArgumentException>(() => service.Recycle(scan.Root));
+        var result = service.Recycle(Assert.Single(scan.Root.Children), source.Token);
+        Assert.Empty(result.Recycled);
+        Assert.Contains("cancelled", Assert.Single(result.Issues).Message);
+    }
+
+    [Fact]
+    [Trait("Category", "RecycleIntegration")]
+    public Task ContextFolderRecyclingMovesOnlyTheChosenFolderAndRefreshesWithoutFindingDuplicates() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        var chosen = folder.Write(@"chosen\nested\file.txt", "chosen");
+        var retained = folder.Write(@"retained\file.txt", "retained");
+        var model = new MainViewModel { FolderPath = folder.Root };
+        await model.ScanAsync();
+        var node = model.Rows.Single(row => row.Name == "chosen").Node;
+        await model.RecycleItemAsync(node);
+        Assert.False(File.Exists(chosen));
+        Assert.False(Directory.Exists(node.FullPath));
+        Assert.True(File.Exists(retained));
+        Assert.Equal("retained", Assert.Single(model.Rows).Name);
+        Assert.Empty(model.Issues);
+        Assert.Empty(model.DuplicateRows);
+        Assert.Contains("Run Find duplicates", model.DuplicateSummary);
+        Assert.Contains("1 files confirmed recycled", model.Status);
+    });
 }

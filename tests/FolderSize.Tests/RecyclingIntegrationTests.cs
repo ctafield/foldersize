@@ -7,6 +7,45 @@ namespace FolderSize.Tests;
 public sealed class RecyclingIntegrationTests
 {
     [Fact]
+    [Trait("Category", "RecycleIntegration")]
+    public Task ContextRecyclingIgnoresCheckboxesAndDeletesOnlyTheClickedDuplicate() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write("one.txt", "same");
+        folder.Write("two.txt", "same");
+        folder.Write("three.txt", "same");
+        var model = new MainViewModel { FolderPath = folder.Root };
+        await model.ScanAsync();
+        await model.FindAsync();
+        foreach (var row in model.DuplicateRows) row.Selected = true;
+        var clicked = model.DuplicateRows.Last();
+        var retained = model.DuplicateRows.Where(row => row != clicked).Select(row => row.Path).ToArray();
+        await model.RecycleDuplicateAsync(clicked);
+        Assert.False(File.Exists(clicked.Path));
+        Assert.All(retained, path => Assert.True(File.Exists(path)));
+        Assert.Equal(2, model.DuplicateRows.Count);
+        Assert.Empty(model.Issues);
+    });
+
+    [Fact]
+    [Trait("Category", "RecycleIntegration")]
+    public Task ContextRecyclingRefusesToDeleteTheLastReadableDuplicate() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write("one.txt", "same");
+        folder.Write("two.txt", "same");
+        var model = new MainViewModel { FolderPath = folder.Root };
+        await model.ScanAsync();
+        await model.FindAsync();
+        var clicked = model.DuplicateRows.Last();
+        File.Delete(model.DuplicateRows.First().Path);
+        await model.RecycleDuplicateAsync(clicked);
+        Assert.True(File.Exists(clicked.Path));
+        Assert.NotEmpty(model.Issues);
+        Assert.Contains("0 files confirmed recycled", model.Status);
+    });
+
+    [Fact]
     public void NonRecyclingShellCallbackIsVetoed()
     {
         var sink = new RecycleSink();

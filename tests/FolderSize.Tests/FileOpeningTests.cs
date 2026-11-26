@@ -60,6 +60,105 @@ public sealed class FileOpeningTests
         Assert.False(restored.OpenWithDoubleClick);
     }
 
+    [Theory]
+    [InlineData("UsageGrid", 0)]
+    [InlineData("DuplicatesGrid", 1)]
+    [InlineData("LargeFilesGrid", 2)]
+    public Task ContextMenuTargetsTheClickedRowAndExplicitOpenIgnoresDoubleClickPreference(string name, int page) => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write("first.txt", "same");
+        folder.Write("second.txt", "same");
+        var opened = new List<string>();
+        var copied = new List<string>();
+        var window = new MainWindow(openWithDoubleClick: false,
+            settingsStore: new ThemeSettingsStore(Path.Combine(folder.Root, "preferences.json")),
+            theme: AppTheme.Light, fileOpener: new FileOpener(info => opened.Add(info.FileName)),
+            copyToClipboard: copied.Add);
+        try
+        {
+            window.Show();
+            window.Model.FolderPath = folder.Root;
+            await window.Model.ScanAsync();
+            await window.Model.FindAsync();
+            window.Model.LargeFileSize = "0";
+            await window.Model.FindLargeFilesAsync();
+            ((TabControl)window.FindName("MainSections")).SelectedIndex = page;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var grid = (DataGrid)window.FindName(name);
+            grid.SelectedIndex = 0;
+            var row = Assert.IsType<DataGridRow>(grid.ItemContainerGenerator.ContainerFromIndex(1));
+            var path = row.Item is UsageRow usage ? usage.FullPath : ((DuplicateRow)row.Item).Path;
+            var menu = row.ContextMenu;
+            Assert.NotNull(menu);
+            menu.PlacementTarget = row;
+            menu.IsOpen = true;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert.Same(row.Item, grid.SelectedItem);
+            Assert.Equal(6, menu.Items.Count);
+            Assert.IsType<Separator>(menu.Items[1]);
+            Assert.IsType<Separator>(menu.Items[4]);
+            var items = menu.Items.OfType<MenuItem>().ToArray();
+            Assert.Equal(new[] { "Open", "Copy filename", "Copy full path", "Send to Recycle Bin" },
+                items.Select(item => item.Header));
+            Assert.All(items, item =>
+            {
+                var icon = Assert.IsType<TextBlock>(item.Icon);
+                Assert.Contains("Segoe Fluent Icons", icon.FontFamily.Source);
+                Assert.False(string.IsNullOrWhiteSpace(icon.Text));
+            });
+            items[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Equal(path, Assert.Single(opened));
+            items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Equal(new[] { Path.GetFileName(path), path }, copied);
+            menu.IsOpen = false;
+            Assert.True(File.Exists(path));
+        }
+        finally { window.Close(); }
+    });
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task ContextOpenNavigatesFoldersAndIncompleteFoldersCannotBeRecycled(bool recursive) => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write(@"nested\file.txt", "nested");
+        var window = new MainWindow(new ThemeSettingsStore(Path.Combine(folder.Root, "preferences.json")), AppTheme.Light,
+            fileOpener: new FileOpener(_ => Assert.Fail("Folder Open must not launch a file.")));
+        try
+        {
+            window.Show();
+            window.Model.FolderPath = folder.Root;
+            window.Model.Recursive = recursive;
+            await window.Model.ScanAsync();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var grid = (DataGrid)window.FindName("UsageGrid");
+            var row = Assert.IsType<DataGridRow>(grid.ItemContainerGenerator.ContainerFromIndex(0));
+            var node = Assert.IsType<UsageRow>(row.Item).Node;
+            var menu = row.ContextMenu;
+            menu.PlacementTarget = row;
+            menu.IsOpen = true;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var items = menu.Items.OfType<MenuItem>().ToArray();
+            Assert.Equal(recursive, items[0].IsEnabled);
+            Assert.Equal(recursive, items[^1].IsEnabled);
+            if (recursive)
+            {
+                items[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                for (var i = 0; i < 100 && window.Model.Current != node; i++) await Task.Delay(10);
+                Assert.Same(node, window.Model.Current);
+            }
+            else Assert.Equal(folder.Root, window.Model.CurrentPath);
+            menu.IsOpen = false;
+            Assert.True(File.Exists(Path.Combine(folder.Root, @"nested\file.txt")));
+        }
+        finally { window.Close(); }
+    });
+
     [Fact]
     public Task SettingAppliesImmediatelyToAllListsAndFailedSaveRevertsChoice() => Sta.Run(async () =>
     {

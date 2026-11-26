@@ -469,10 +469,43 @@ public sealed class MainViewModel : Observable
         if (!CanRecycleLargeFiles) return;
         var files = LargeFiles.Where(row => row.Selected).Select(row => row.Node).ToArray();
         await RecycleAndRefreshAsync(token => new FileRecycling(new WindowsFileAccess(), new ShellRecycler())
-            .Recycle(files, token), refreshLargeFiles: true);
+            .Recycle(files, token), refreshLargeFiles: true, refreshDuplicates: false);
     }
 
-    private async Task RecycleAndRefreshAsync(Func<CancellationToken, RecycleResult> recycle, bool refreshLargeFiles)
+    public Task RecycleItemAsync(ScanNode node)
+    {
+        if (!CanFind || scan is null) return Task.CompletedTask;
+        var root = node;
+        while (root.Parent is not null) root = root.Parent;
+        if (root != scan.Root || node == scan.Root)
+        {
+            Issues = Issues.Append(new FileIssue(node.FullPath, "Item is no longer in the current scan. Scan again before recycling.")).ToArray();
+            Status = "Nothing recycled; see Issues.";
+            return Task.CompletedTask;
+        }
+        return RecycleAndRefreshAsync(token => node.IsDirectory
+            ? new FolderRecycling(new WindowsFileAccess(), new ShellRecycler(allowDirectories: true)).Recycle(node, token)
+            : new FileRecycling(new WindowsFileAccess(), new ShellRecycler()).Recycle([node], token),
+            refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: duplicates is not null);
+    }
+
+    public Task RecycleDuplicateAsync(DuplicateRow row)
+    {
+        if (!CanFind || duplicates is null) return Task.CompletedTask;
+        if (!DuplicateRows.Contains(row))
+        {
+            Issues = Issues.Append(new FileIssue(row.Path, "Duplicate results changed. Find duplicates again before recycling.")).ToArray();
+            Status = "Nothing recycled; see Issues.";
+            return Task.CompletedTask;
+        }
+        var groups = duplicates.Groups;
+        return RecycleAndRefreshAsync(token => new DuplicateRecycling(new WindowsFileAccess(), new ShellRecycler())
+            .Recycle(groups, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { row.Path }, token),
+            refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: true);
+    }
+
+    private async Task RecycleAndRefreshAsync(Func<CancellationToken, RecycleResult> recycle, bool refreshLargeFiles,
+        bool refreshDuplicates = true)
     {
         if (scan is null) return;
         var rootPath = scan.Root.FullPath;
@@ -500,7 +533,7 @@ public sealed class MainViewModel : Observable
         if (scan is not null)
         {
             if (refreshLargeFiles) await FindLargeFilesAsync();
-            else await FindAsync();
+            if (refreshDuplicates) await FindAsync();
         }
         Issues = Issues.Concat(recycleIssues).ToArray();
         Status = $"Recycling finished: {result?.Recycled.Count ?? 0:N0} files confirmed recycled; " +
