@@ -10,7 +10,7 @@
         ThemeMode="System" Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
         FontFamily="Segoe UI Variable, Segoe UI" FontSize="14"
         Foreground="{DynamicResource TextFillColorPrimaryBrush}" UseLayoutRounding="True"
-        Closing="Window_Closing" SizeChanged="Window_SizeChanged">
+        Closing="Window_Closing" SizeChanged="Window_SizeChanged" PreviewMouseDown="Window_PreviewMouseDown">
     <Window.Resources>
         <SolidColorBrush x:Key="SecondaryTextBrush" Color="{DynamicResource TextFillColorSecondary}"/>
         <SolidColorBrush x:Key="CardBrush" Color="{DynamicResource CardBackgroundFillColorDefault}"/>

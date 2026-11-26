@@ -413,6 +413,110 @@ public sealed class InterfaceTests
         Assert.Equal(folder.Root, model.FolderPath);
     });
 
+    [Fact]
+    public Task MouseSideButtonsNavigateCachedHistoryAndClearForwardHistoryOnANewBranch() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write(@"first\a", "same");
+        folder.Write(@"first\b", "same");
+        folder.Write(@"second\file", "other");
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var model = window.Model;
+            model.FolderPath = folder.Root;
+            await model.ScanAsync();
+            await model.FindAsync();
+            var root = model.Current!;
+            var first = model.Rows.Single(row => row.Name == "first").Node;
+            var second = model.Rows.Single(row => row.Name == "second").Node;
+            var duplicates = model.DuplicateRows;
+            Assert.False(model.CanGoBack);
+            Assert.False(model.CanGoForward);
+            await model.NavigateAsync(first);
+            var grid = (DataGrid)window.FindName("UsageGrid");
+
+            async Task Press(MouseButton button, ScanNode expected)
+            {
+                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, button)
+                { RoutedEvent = Mouse.PreviewMouseDownEvent };
+                grid.RaiseEvent(args);
+                Assert.True(args.Handled);
+                for (var i = 0; i < 100 && model.Current != expected; i++) await Task.Delay(10);
+                Assert.Same(expected, model.Current);
+                Assert.Same(duplicates, model.DuplicateRows);
+                Assert.Equal(folder.Root, model.FolderPath);
+                Assert.True(model.CanFind);
+            }
+
+            await Press(MouseButton.XButton1, root);
+            Assert.True(model.CanGoForward);
+            await Press(MouseButton.XButton2, first);
+            Assert.False(model.CanGoForward);
+            await Press(MouseButton.XButton1, root);
+            await model.RootAsync();
+            Assert.True(model.CanGoForward);
+            await model.NavigateAsync(second);
+            Assert.False(model.CanGoForward);
+            await Press(MouseButton.XButton2, second);
+            var primary = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+            { RoutedEvent = Mouse.PreviewMouseDownEvent };
+            window.RaiseEvent(primary);
+            Assert.False(primary.Handled);
+            Assert.Same(second, model.Current);
+        }
+        finally { window.Close(); }
+    });
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public Task FolderHistoryOutsideTheScanNeverRescansOrRestoresStaleResults(bool recursive, bool scanFirst) => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write(@"parent\child\file", "child");
+        var parent = Path.Combine(folder.Root, "parent");
+        var child = Path.Combine(parent, "child");
+        var model = new MainViewModel { FolderPath = child + @"\.", Recursive = recursive };
+        if (scanFirst) await model.ScanAsync();
+        await model.UpAsync();
+        await model.UpAsync();
+        await model.BackAsync();
+        Assert.Equal(parent, model.CurrentPath);
+        await model.BackAsync();
+        Assert.Equal(child, model.CurrentPath);
+        Assert.False(model.CanGoBack);
+        await model.BackAsync();
+        Assert.Equal(child, model.CurrentPath);
+        Assert.Null(model.Current);
+        Assert.Empty(model.Rows);
+        Assert.False(model.CanFind);
+        Assert.False(model.Busy);
+        await model.ForwardAsync();
+        Assert.Equal(parent, model.CurrentPath);
+        Assert.Null(model.Current);
+        Assert.Empty(model.Rows);
+        Assert.False(model.CanFind);
+
+        folder.Write(@"parent\child\new-file", "new");
+        await model.ScanAsync();
+        await model.BackAsync();
+        Assert.Equal(child, model.CurrentPath);
+        Assert.Equal(recursive, model.CanFind);
+        if (recursive)
+        {
+            Assert.Equal(2, model.Rows.Count);
+            Assert.NotNull(model.Current);
+        }
+        else
+        {
+            Assert.Empty(model.Rows);
+            Assert.Null(model.Current);
+        }
+    });
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

@@ -68,6 +68,8 @@ Light and dark themes follow Microsoft's [Windows design principles](https://lea
 5. Select an entry to highlight it in the treemap. Hover for its path and size. Tiny entries are combined into a labeled **Other** tile to bound drawing work; they remain individually available in the list.
 6. **Cancel** stops scanning or duplicate discovery. Cancelled operations do not enable actions on incomplete results.
 
+Mouse side buttons navigate folder history: **Back** (button 4 / XButton1) returns to the previous folder and **Forward** (button 5 / XButton2) revisits it. History is kept for the current app session and includes opening measured folders, Up, and Scan root. Opening a different folder after going back clears forward history. These buttons never start a scan: they reuse the current scan when possible, otherwise select the folder with empty results until you choose **Scan**. Navigation is disabled during an operation.
+
 Sizes use binary units (KiB, MiB, GiB) and count logical file lengths, **not allocated disk space**. Sparse/compressed files, hard links, filesystem metadata, and the Recycle Bin can make physical usage different. In particular, path-based folder totals count each hard-linked path.
 
 Hidden/system entries are included when accessible. Junctions and symbolic links are skipped. The **Issues** tab lists skipped, inaccessible, missing, or changing files. A folder with omitted entries is labeled partial; a scan can complete with issues.

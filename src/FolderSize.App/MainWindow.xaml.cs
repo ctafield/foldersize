@@ -115,6 +115,13 @@ public partial class MainWindow : Window
     }
 
     private async void Scan_Click(object sender, RoutedEventArgs e) => await Model.ScanAsync();
+    private async void Window_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton is not (MouseButton.XButton1 or MouseButton.XButton2)) return;
+        e.Handled = true;
+        if (e.ChangedButton == MouseButton.XButton1) await Model.BackAsync();
+        else await Model.ForwardAsync();
+    }
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         NavigationPane.Width = e.NewSize.Width < 1100 ? 56 : 216;

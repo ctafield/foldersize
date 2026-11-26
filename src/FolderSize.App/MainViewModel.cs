@@ -67,6 +67,8 @@ public sealed class MainViewModel : Observable
     private DuplicateResult? duplicates;
     private long operationId;
     private long navigationId;
+    private readonly List<string> navigationHistory = [];
+    private int historyIndex = -1;
     private int selectedCount;
     private SpaceMapGroups mapGroups = new([], []);
     public SpaceMapGroups MapGroups { get => mapGroups; private set => Set(ref mapGroups, value); }
@@ -144,6 +146,8 @@ public sealed class MainViewModel : Observable
             Changed(nameof(CanFind));
             Changed(nameof(CanRecycle));
             Changed(nameof(CanRecycleLargeFiles));
+            Changed(nameof(CanGoBack));
+            Changed(nameof(CanGoForward));
         }
     }
     public bool Idle => !Busy;
@@ -207,6 +211,7 @@ public sealed class MainViewModel : Observable
         if (Busy) return;
         Rename.ReloadHistory();
         var path = FolderPath;
+        var previousPath = CurrentPath;
         var recurse = Recursive;
         InvalidateScan();
         Issues = [];
@@ -220,6 +225,7 @@ public sealed class MainViewModel : Observable
             scan = await Task.Run(() => new FolderScanner().Scan(path, recurse, progress, token), token);
             scannedRecursively = recurse;
             Issues = scan.Issues;
+            if (historyIndex < 0) RecordNavigation(previousPath);
             await NavigateAsync(scan.Root);
             Status = $"Scan complete. {scan.FileCount:N0} files. {Issues.Count:N0} issues.";
         }
@@ -232,9 +238,12 @@ public sealed class MainViewModel : Observable
         finally { End(); }
     }
 
-    public async Task NavigateAsync(ScanNode? node)
+    public Task NavigateAsync(ScanNode? node) => NavigateAsync(node, recordHistory: true);
+
+    private async Task NavigateAsync(ScanNode? node, bool recordHistory)
     {
         if (node is null || !node.IsDirectory || !node.IsScanned) return;
+        var previousPath = CurrentPath;
         var id = ++navigationId;
         var result = await Task.Run(() =>
         {
@@ -244,10 +253,69 @@ public sealed class MainViewModel : Observable
             return (Rows: newRows, Groups: SpaceMapGroups.Create(node));
         });
         if (id != navigationId) return;
+        if (recordHistory)
+        {
+            if (historyIndex < 0) RecordNavigation(previousPath);
+            RecordNavigation(node.FullPath);
+        }
         Current = node;
         Rows = result.Rows;
         MapGroups = result.Groups;
         Rename.SetScope(node);
+    }
+
+    public bool CanGoBack => Idle && historyIndex > 0;
+    public bool CanGoForward => Idle && historyIndex + 1 < navigationHistory.Count;
+    public Task BackAsync() => NavigateHistoryAsync(-1);
+    public Task ForwardAsync() => NavigateHistoryAsync(1);
+
+    private void RecordNavigation(string path)
+    {
+        path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        if (historyIndex >= 0 &&
+            string.Equals(navigationHistory[historyIndex], path, StringComparison.OrdinalIgnoreCase)) return;
+        navigationHistory.RemoveRange(historyIndex + 1, navigationHistory.Count - historyIndex - 1);
+        navigationHistory.Add(path);
+        historyIndex++;
+        Changed(nameof(CanGoBack));
+        Changed(nameof(CanGoForward));
+    }
+
+    private async Task NavigateHistoryAsync(int offset)
+    {
+        if (Busy) return;
+        var index = historyIndex + offset;
+        if (index < 0 || index >= navigationHistory.Count) return;
+        historyIndex = index;
+        Changed(nameof(CanGoBack));
+        Changed(nameof(CanGoForward));
+        var path = navigationHistory[index];
+        var node = scan?.Root;
+        if (node is not null)
+        {
+            var relativePath = Path.GetRelativePath(node.FullPath, path);
+            foreach (var part in relativePath.Split(
+                         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (part == ".") continue;
+                node = node.Children.FirstOrDefault(child => child.IsDirectory && child.IsScanned &&
+                    string.Equals(child.Name, part, StringComparison.OrdinalIgnoreCase));
+                if (node is null) break;
+            }
+        }
+        if (node is not null) await NavigateAsync(node, recordHistory: false);
+        else SelectUnscannedFolder(path, "Folder selected. Choose Scan to measure its contents.");
+    }
+
+    private void SelectUnscannedFolder(string path, string message)
+    {
+        InvalidateScan();
+        Issues = [];
+        FolderPath = path;
+        Status = message;
+        Changed(nameof(Summary));
+        Changed(nameof(CanFind));
     }
 
     public async Task UpAsync()
@@ -272,12 +340,9 @@ public sealed class MainViewModel : Observable
             return;
         }
         if (parentDirectory is null) return;
-        InvalidateScan();
-        Issues = [];
-        FolderPath = parentDirectory.FullName;
-        Status = "Parent folder selected. Choose Scan to measure its contents.";
-        Changed(nameof(Summary));
-        Changed(nameof(CanFind));
+        if (historyIndex < 0) RecordNavigation(path);
+        RecordNavigation(parentDirectory.FullName);
+        SelectUnscannedFolder(parentDirectory.FullName, "Parent folder selected. Choose Scan to measure its contents.");
     }
     public Task RootAsync() => NavigateAsync(scan?.Root);
 
