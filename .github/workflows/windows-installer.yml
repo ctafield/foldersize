@@ -1,0 +1,74 @@
+name: Windows installer
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Select version
+        id: version
+        run: |
+          $version = '1.0.0'
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
+              throw 'Installer tags must use vMAJOR.MINOR.PATCH (optionally .REVISION).'
+            }
+          }
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publish self-contained Windows app
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          dotnet publish src\FolderSize.App\FolderSize.App.csproj -c Release -r win-x64 --self-contained true -p:Version=$env:APP_VERSION -o artifacts\FolderSize-installer-win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Publishing failed.' }
+
+      - name: Prepare Inno Setup compiler
+        run: |
+          $download = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.4.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe' -OutFile $download
+          $signature = Get-AuthenticodeSignature $download
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Pyrsys B\.V\.') {
+            throw 'Inno Setup download has an invalid or unexpected signature.'
+          }
+          $compilerDir = Join-Path $env:RUNNER_TEMP 'InnoSetup'
+          $process = Start-Process $download -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/PORTABLE=1', '/TASKS=""', "/DIR=`"$compilerDir`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Compiler setup failed: $($process.ExitCode)" }
+          "INNO_COMPILER=$compilerDir\ISCC.exe" >> $env:GITHUB_ENV
+
+      - name: Compile installer
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          & $env:INNO_COMPILER "/DAppVersion=$env:APP_VERSION" installer\FolderSize.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
+
+      - name: Verify installation and removal
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          .\installer\Test-Installer.ps1 -InstallerPath "artifacts\FolderSize-$env:APP_VERSION-win-x64-Setup.exe"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: FolderSize-win-x64-installer
+          path: artifacts\FolderSize-*-win-x64-Setup.exe
+          if-no-files-found: error

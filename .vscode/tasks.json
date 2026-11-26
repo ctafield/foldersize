@@ -1,0 +1,66 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "build",
+                "${workspaceFolder}\\FolderSize.slnx",
+                "--configuration",
+                "Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$msCompile",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "test",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "test",
+                "${workspaceFolder}\\tests\\FolderSize.Tests\\FolderSize.Tests.csproj",
+                "--configuration",
+                "Debug",
+                "--filter",
+                "Category!=Performance&Category!=RecycleIntegration"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$msCompile",
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "publish",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "publish",
+                "${workspaceFolder}\\src\\FolderSize.App\\FolderSize.App.csproj",
+                "--configuration",
+                "Release",
+                "--runtime",
+                "win-x64",
+                "--self-contained",
+                "false",
+                "--output",
+                "${workspaceFolder}\\artifacts\\FolderSize-win-x64"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}

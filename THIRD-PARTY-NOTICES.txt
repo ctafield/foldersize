@@ -1,0 +1,19 @@
+FolderSize icon
+==============
+
+"card file box" (Unicode 1F5C3), designed by Sina Schulz for OpenMoji.
+OpenMoji is an open-source emoji project.
+
+Artwork: https://openmoji.org/library/emoji-1F5C3/
+Source PNG: https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/color/618x618/1F5C3.png
+Project: https://openmoji.org/
+
+License: Creative Commons Attribution-ShareAlike 4.0 International
+(CC BY-SA 4.0).
+License summary: https://creativecommons.org/licenses/by-sa/4.0/
+Full legal terms: https://creativecommons.org/licenses/by-sa/4.0/legalcode
+
+Changes: resized the original color PNG and converted it to a multi-resolution
+Windows ICO containing 16, 24, 32, 48, 64, 128 and 256 pixel images.
+The original PNG and converted ICO remain available under CC BY-SA 4.0.
+No endorsement by OpenMoji or the artist is implied.

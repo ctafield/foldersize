@@ -1,0 +1,18 @@
+Windows Registry Editor Version 5.00
+
+; Per-user Explorer integration. Update the executable path below if you move the app.
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\shell\FolderSize]
+@="Scan with FolderSize"
+"Icon"="G:\\Dev\\FolderSize\\artifacts\\FolderSize-win-x64\\FolderSize.exe,0"
+"MultiSelectModel"="Single"
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\shell\FolderSize\command]
+@="\"G:\\Dev\\FolderSize\\artifacts\\FolderSize-win-x64\\FolderSize.exe\" \"%1\\.\""
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\FolderSize]
+@="Scan with FolderSize"
+"Icon"="G:\\Dev\\FolderSize\\artifacts\\FolderSize-win-x64\\FolderSize.exe,0"
+
+[HKEY_CURRENT_USER\Software\Classes\Directory\Background\shell\FolderSize\command]
+@="\"G:\\Dev\\FolderSize\\artifacts\\FolderSize-win-x64\\FolderSize.exe\" \"%V\\.\""
