@@ -4,7 +4,46 @@ A lightweight Windows folder-size explorer built with C# and WPF. No browser eng
 
 The interface uses Microsoft's built-in WPF Fluent theme, supports Windows light/dark mode and accent color, and keeps native keyboard navigation and virtualized file lists. A left navigation menu switches between **Space usage**, **Duplicates**, **Large Files**, **Rename**, and **Issues**, with **Settings** pinned at the bottom. Items have icons, rounded selection backgrounds, and an accent indicator. At narrow window widths it becomes an icon rail with tooltips; use arrow keys to navigate. Switching views preserves their state.
 
-### Settings
+## Screenshots
+
+These illustrative screenshots use the real interface with fictional, in-memory files, sizes, duplicate groups, and rename previews. No real files were scanned, opened, or modified to create them.
+
+### Space usage and treemap
+
+See which folders consume the most space, with sorted sizes and an interactive, color-coded space map.
+
+![Space usage and treemap with fictional demo folders](docs/screenshots/space-usage.png)
+
+<details>
+<summary>More features: duplicates, large files, renaming, and context menus</summary>
+
+### Exact duplicates
+
+Review duplicate groups, their extra logical bytes, and the copies selected for recycling.
+
+![Duplicate groups and recycling selections using fictional files](docs/screenshots/duplicates.png)
+
+### Large files
+
+Filter the completed scan by minimum size and review the largest files across subfolders. Shown in dark mode.
+
+![Large-file filtering with fictional media and archives in dark mode](docs/screenshots/large-files.png)
+
+### Rename previews
+
+Preview original and proposed filenames before applying a rename rule. Shown in dark mode; this example changes no files.
+
+![Find-and-replace rename preview using fictional photo filenames](docs/screenshots/rename-preview.png)
+
+### Fluent context menus
+
+Open an item, copy its filename or full path, or send it to the Recycle Bin using the icon-based context menu.
+
+![Fluent context menu shown over fictional folder contents](docs/screenshots/context-menu.png)
+
+</details>
+
+## Settings
 
 The main window remembers its size and screen position when you close it normally, stored in the same settings file. Maximized windows reopen maximized, preserving their previous normal size; minimized windows never reopen minimized. Windows adjusts a saved position that is completely off-screen after a monitor is disconnected or the display layout changes. Existing settings without window bounds keep the default size and position.
 
