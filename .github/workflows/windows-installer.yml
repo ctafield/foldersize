@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: windows-installer-release
+  cancel-in-progress: false
 
 jobs:
   installer:
@@ -14,6 +18,8 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -22,14 +28,30 @@ jobs:
       - name: Select version
         id: version
         run: |
-          $version = '1.0.0'
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $version = $env:GITHUB_REF_NAME -replace '^v', ''
-            if ($version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
-              throw 'Installer tags must use vMAJOR.MINOR.PATCH (optionally .REVISION).'
+          $tags = @(git tag --list 'v*')
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read existing version tags.' }
+          $versions = @(
+            foreach ($tag in $tags) {
+              if ($tag -match '^v\d+\.\d+\.\d+(\.\d+)?$') {
+                $parsed = [version]$tag.Substring(1)
+                if ($parsed.Major -gt 65534 -or $parsed.Minor -gt 65534 -or $parsed.Build -gt 65534 -or $parsed.Revision -gt 65534) {
+                  throw "Tag $tag exceeds the Windows assembly version limits."
+                }
+                $parsed
+              }
             }
+          )
+          $version = '1.0.0'
+          if ($versions.Count -gt 0) {
+            $latest = $versions | Sort-Object -Descending | Select-Object -First 1
+            if ($latest.Build -ge 65534) {
+              throw 'Patch version reached the Windows assembly limit. Create a higher major/minor version tag before retrying.'
+            }
+            $version = '{0}.{1}.{2}' -f $latest.Major, $latest.Minor, ($latest.Build + 1)
           }
           "value=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Building release v$version"
 
       - name: Publish self-contained Windows app
         env:
@@ -70,3 +92,18 @@ jobs:
           name: FolderSize-win-x64-installer
           path: artifacts\FolderSize-*-win-x64-Setup.exe
           if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_VERSION: ${{ steps.version.outputs.value }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $installer = "artifacts\FolderSize-$env:APP_VERSION-win-x64-Setup.exe"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+            throw "Installer asset is missing: $installer"
+          }
+          gh api "repos/$env:GITHUB_REPOSITORY/git/refs" --method POST -f "ref=refs/tags/$env:RELEASE_TAG" -f "sha=$env:GITHUB_SHA" --silent
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create the release tag. No existing tag was overwritten.' }
+          gh release create "$env:RELEASE_TAG" "$installer" --verify-tag --title "FolderSize $env:APP_VERSION" --generate-notes --latest
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation or installer upload failed.' }
