@@ -4,27 +4,34 @@ using FolderSize.Core;
 
 namespace FolderSize.App;
 
-public partial class SettingsWindow : Window
+public partial class SettingsView : UserControl
 {
     private readonly ThemeSettingsStore store;
     private readonly Action<AppSettings> applySettings;
     private AppSettings savedSettings;
 
-    public SettingsWindow(ThemeSettingsStore store, AppSettings settings, Action<AppSettings> applySettings)
+    public SettingsView(ThemeSettingsStore store, AppSettings settings, Action<AppSettings> applySettings)
     {
         this.store = store;
         this.applySettings = applySettings;
         savedSettings = settings;
         InitializeComponent();
         ThemeBox.ItemsSource = Enum.GetValues<AppTheme>();
-        ThemeBox.SelectedItem = settings.Theme;
-        OpenWithDoubleClickBox.IsChecked = settings.OpenWithDoubleClick;
-        StartScanningOnOpenBox.IsChecked = settings.StartScanningOnOpen;
+        LoadSettings(settings);
         ThemeBox.SelectionChanged += Theme_SelectionChanged;
         OpenWithDoubleClickBox.Checked += FileOpening_Changed;
         OpenWithDoubleClickBox.Unchecked += FileOpening_Changed;
         StartScanningOnOpenBox.Checked += StartupScanning_Changed;
         StartScanningOnOpenBox.Unchecked += StartupScanning_Changed;
+    }
+
+    public void LoadSettings(AppSettings settings)
+    {
+        savedSettings = settings;
+        ThemeBox.SelectedItem = settings.Theme;
+        OpenWithDoubleClickBox.IsChecked = settings.OpenWithDoubleClick;
+        StartScanningOnOpenBox.IsChecked = settings.StartScanningOnOpen;
+        SaveStatus.Text = "Changes apply immediately and are saved for future launches.";
     }
 
     private void Theme_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -64,5 +71,4 @@ public partial class SettingsWindow : Window
         SaveStatus.Text = "Settings saved. Your choices will be used next time you open FolderSize.";
     }
 
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
 }

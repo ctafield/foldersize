@@ -20,7 +20,7 @@ public sealed class InterfaceTests
     [InlineData(820, 56)]
     public Task LeftNavigationSwitchesExistingViewsAndFitsTheWindow(double width, double paneWidth) => Sta.Run(async () =>
     {
-        var window = new MainWindow { Width = width };
+        var window = new MainWindow { Width = width, Height = 640 };
         try
         {
             window.Show();
@@ -46,6 +46,15 @@ public sealed class InterfaceTests
                     Assert.True(bounds.Right <= window.ActualWidth, $"{names[index]} extends beyond the window.");
                 }
             }
+            var settings = Assert.IsType<SettingsView>(((ContentControl)window.FindName("SettingsContent")).Content);
+            Assert.Same(window, Window.GetWindow(settings));
+            Assert.True(settings.IsVisible);
+            Assert.Empty(window.OwnedWindows.Cast<Window>());
+            Assert.False(((TextBox)window.FindName("FolderBox")).IsVisible);
+            var settingsItem = (ListBoxItem)window.FindName("SettingsNavigationItem");
+            var pane = (Border)window.FindName("NavigationPane");
+            var bottom = settingsItem.TranslatePoint(new Point(0, settingsItem.ActualHeight), pane).Y;
+            Assert.InRange(pane.ActualHeight - bottom, 0, 4);
             ((TabItem)window.FindName("DuplicatesTab")).IsSelected = true;
             Assert.Equal(1, navigation.SelectedIndex);
             navigation.SelectedIndex = 2;
@@ -71,29 +80,18 @@ public sealed class InterfaceTests
             try
             {
                 window.Show();
-                var handled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                _ = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
-                {
-                    SettingsWindow? dialog = null;
-                    try
-                    {
-                        dialog = Assert.IsType<SettingsWindow>(Assert.Single(window.OwnedWindows.Cast<Window>()));
-                        var box = (CheckBox)dialog.FindName("StartScanningOnOpenBox");
-                        Assert.Equal(!enabled, box.IsChecked);
-                        using (var locked = new FileStream(store.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                            box.IsChecked = enabled;
-                        Assert.Equal(!enabled, box.IsChecked);
-                        Assert.Contains("Could not save", ((TextBlock)dialog.FindName("SaveStatus")).Text);
-                        Assert.Equal(!enabled, store.LoadSettings().StartScanningOnOpen);
-                        box.IsChecked = enabled;
-                        ((ComboBox)dialog.FindName("ThemeBox")).SelectedItem = AppTheme.Dark;
-                        handled.SetResult();
-                    }
-                    catch (Exception ex) { handled.SetException(ex); }
-                    finally { dialog?.Close(); }
-                }));
-                ((MenuItem)window.FindName("AppearanceMenuItem")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-                await handled.Task;
+                ((ListBoxItem)window.FindName("SettingsNavigationItem")).IsSelected = true;
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                var view = Assert.IsType<SettingsView>(((ContentControl)window.FindName("SettingsContent")).Content);
+                var box = (CheckBox)view.FindName("StartScanningOnOpenBox");
+                Assert.Equal(!enabled, box.IsChecked);
+                using (var locked = new FileStream(store.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    box.IsChecked = enabled;
+                Assert.Equal(!enabled, box.IsChecked);
+                Assert.Contains("Could not save", ((TextBlock)view.FindName("SaveStatus")).Text);
+                Assert.Equal(!enabled, store.LoadSettings().StartScanningOnOpen);
+                box.IsChecked = enabled;
+                ((ComboBox)view.FindName("ThemeBox")).SelectedItem = AppTheme.Dark;
                 var recursive = (CheckBox)window.FindName("IncludeSubfoldersBox");
                 recursive.IsChecked = true;
                 recursive.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
@@ -102,6 +100,14 @@ public sealed class InterfaceTests
                 Assert.Equal(AppTheme.Dark, restored.Theme);
                 Assert.False(restored.OpenWithDoubleClick);
                 Assert.True(restored.IncludeSubfolders);
+                ((ComboBox)view.FindName("ThemeBox")).SelectedItem = AppTheme.Light;
+                Assert.True(store.LoadSettings().IncludeSubfolders);
+                ((ListBox)window.FindName("MainNavigation")).SelectedIndex = 0;
+                recursive.IsChecked = false;
+                recursive.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                ((ListBoxItem)window.FindName("SettingsNavigationItem")).IsSelected = true;
+                ((ComboBox)view.FindName("ThemeBox")).SelectedItem = AppTheme.Dark;
+                Assert.False(store.LoadSettings().IncludeSubfolders);
             }
             finally { window.Close(); }
         }
@@ -182,7 +188,7 @@ public sealed class InterfaceTests
     });
 
     [Fact]
-    public Task SettingsMenuAppliesThemeToBothWindowsAndRestoresItAfterReopening() => Sta.Run(async () =>
+    public Task SettingsPageAppliesThemeAndRestoresItAfterReopening() => Sta.Run(async () =>
     {
         using var folder = new TestFolder();
         var path = Path.Combine(folder.Root, "settings.json");
@@ -192,34 +198,23 @@ public sealed class InterfaceTests
         try
         {
             window.Show();
-            var handled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(async () =>
-            {
-                SettingsWindow? dialog = null;
-                try
-                {
-                    dialog = Assert.IsType<SettingsWindow>(Assert.Single(window.OwnedWindows.Cast<Window>()));
-                    var box = (ComboBox)dialog.FindName("ThemeBox");
-                    Assert.Equal(AppTheme.Light, box.SelectedItem);
-                    using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-                        box.SelectedItem = AppTheme.Dark;
-                    Assert.Equal(AppTheme.Light, box.SelectedItem);
-                    Assert.Contains("Could not save", ((TextBlock)dialog.FindName("SaveStatus")).Text);
-                    Assert.True(Assert.IsType<SolidColorBrush>(window.Background).Color.R >= 128);
-                    Assert.Equal(AppTheme.Light, new ThemeSettingsStore(path).Load());
+            ((ListBoxItem)window.FindName("SettingsNavigationItem")).IsSelected = true;
+            var view = Assert.IsType<SettingsView>(((ContentControl)window.FindName("SettingsContent")).Content);
+            var box = (ComboBox)view.FindName("ThemeBox");
+            Assert.Equal(AppTheme.Light, box.SelectedItem);
+            using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                box.SelectedItem = AppTheme.Dark;
+            Assert.Equal(AppTheme.Light, box.SelectedItem);
+            Assert.Contains("Could not save", ((TextBlock)view.FindName("SaveStatus")).Text);
+            Assert.True(Assert.IsType<SolidColorBrush>(window.Background).Color.R >= 128);
+            Assert.Equal(AppTheme.Light, new ThemeSettingsStore(path).Load());
 
-                    box.SelectedItem = AppTheme.Dark;
-                    await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-                    Assert.True(Assert.IsType<SolidColorBrush>(window.Background).Color.R < 128);
-                    Assert.True(Assert.IsType<SolidColorBrush>(dialog.Background).Color.R < 128);
-                    Assert.Equal(AppTheme.Dark, new ThemeSettingsStore(path).Load());
-                    handled.SetResult();
-                }
-                catch (Exception ex) { handled.SetException(ex); }
-                finally { dialog?.Close(); }
-            }));
-            ((MenuItem)window.FindName("AppearanceMenuItem")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            await handled.Task;
+            box.SelectedItem = AppTheme.Dark;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert.True(Assert.IsType<SolidColorBrush>(window.Background).Color.R < 128);
+            Assert.Same(window, Window.GetWindow(view));
+            Assert.Empty(window.OwnedWindows.Cast<Window>());
+            Assert.Equal(AppTheme.Dark, new ThemeSettingsStore(path).Load());
         }
         finally { window.Close(); }
 
@@ -230,28 +225,15 @@ public sealed class InterfaceTests
             reopened.Show();
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             Assert.True(Assert.IsType<SolidColorBrush>(reopened.Background).Color.R < 128);
-            var handled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(async () =>
-            {
-                SettingsWindow? dialog = null;
-                try
-                {
-                    dialog = Assert.IsType<SettingsWindow>(Assert.Single(reopened.OwnedWindows.Cast<Window>()));
-                    var box = (ComboBox)dialog.FindName("ThemeBox");
-                    Assert.Equal(AppTheme.Dark, box.SelectedItem);
-                    box.SelectedItem = AppTheme.Light;
-                    await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-                    Assert.True(Assert.IsType<SolidColorBrush>(reopened.Background).Color.R >= 128);
-                    Assert.True(Assert.IsType<SolidColorBrush>(dialog.Background).Color.R >= 128);
-                    box.SelectedItem = AppTheme.System;
-                    Assert.Equal(AppTheme.System, restoredStore.Load());
-                    handled.SetResult();
-                }
-                catch (Exception ex) { handled.SetException(ex); }
-                finally { dialog?.Close(); }
-            }));
-            ((MenuItem)reopened.FindName("AppearanceMenuItem")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            await handled.Task;
+            ((ListBoxItem)reopened.FindName("SettingsNavigationItem")).IsSelected = true;
+            var view = Assert.IsType<SettingsView>(((ContentControl)reopened.FindName("SettingsContent")).Content);
+            var box = (ComboBox)view.FindName("ThemeBox");
+            Assert.Equal(AppTheme.Dark, box.SelectedItem);
+            box.SelectedItem = AppTheme.Light;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert.True(Assert.IsType<SolidColorBrush>(reopened.Background).Color.R >= 128);
+            box.SelectedItem = AppTheme.System;
+            Assert.Equal(AppTheme.System, restoredStore.Load());
         }
         finally { reopened.Close(); }
     });

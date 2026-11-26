@@ -2,13 +2,13 @@
 
 A lightweight Windows folder-size explorer built with C# and WPF. No browser engine, database, background service, or administrator access is required.
 
-The interface uses Microsoft's built-in WPF Fluent theme, supports Windows light/dark mode and accent color, and keeps native keyboard navigation and virtualized file lists. A left navigation menu switches between **Space usage**, **Duplicates**, **Large Files**, **Rename**, and **Issues**, with icons, rounded selection backgrounds, and an accent indicator. At narrow window widths it becomes an icon rail with tooltips; use arrow keys to navigate. Switching views preserves their state.
+The interface uses Microsoft's built-in WPF Fluent theme, supports Windows light/dark mode and accent color, and keeps native keyboard navigation and virtualized file lists. A left navigation menu switches between **Space usage**, **Duplicates**, **Large Files**, **Rename**, and **Issues**, with **Settings** pinned at the bottom. Items have icons, rounded selection backgrounds, and an accent indicator. At narrow window widths it becomes an icon rail with tooltips; use arrow keys to navigate. Switching views preserves their state.
 
 ### Settings
 
-Open **Settings > Preferences...** to choose **System**, **Light**, or **Dark** and configure **Open with Double Click** and **Start scanning when app is opened**. System is the default and follows Windows. Changes apply immediately to the app and its dialogs and are saved automatically in `%LOCALAPPDATA%\FolderSize\settings.json`, including when the app is launched from Explorer or a portable folder. Close the dialog when finished; there is no separate Save button.
+Select **Settings** at the bottom of the left menu to open preferences inside the main window. Choose **System**, **Light**, or **Dark** and configure **Open with Double Click** and **Start scanning when app is opened**. System is the default and follows Windows. Changes apply immediately to the app and its dialogs and are saved automatically in `%LOCALAPPDATA%\FolderSize\settings.json`, including when the app is launched from Explorer or a portable folder. Select another menu item when finished; there is no separate Save button. Settings are unavailable during an operation.
 
-If settings cannot be saved, the previous choices are retained and the dialog displays the error. Invalid or unreadable settings produce a startup warning and use defaults for that session without silently overwriting the saved file.
+If settings cannot be saved, the previous choices are retained and the Settings page displays the error. Invalid or unreadable settings produce a startup warning and use defaults for that session without silently overwriting the saved file.
 
 **Open with Double Click** is enabled by default, including for existing settings files. Double-clicking a file in Files & folders, Duplicates, or Large Files opens it using its Windows default action. Turn the setting off to prevent file opening; double-click folder navigation is unaffected. Recycling checkboxes do not open files. Known executable, script, installer, and shortcut types, file types Windows marks dangerous, and files beginning with an executable MZ signature are refused. Missing files and launch failures show an error. This is not a security sandbox: Windows associations and opened documents can themselves run code.
 

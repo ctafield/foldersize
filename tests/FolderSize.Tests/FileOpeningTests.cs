@@ -83,28 +83,17 @@ public sealed class FileOpeningTests
             {
                 if (!enabled)
                 {
-                    var handled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _ = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
-                    {
-                        SettingsWindow? dialog = null;
-                        try
-                        {
-                            dialog = Assert.IsType<SettingsWindow>(Assert.Single(window.OwnedWindows.Cast<Window>()));
-                            var box = (CheckBox)dialog.FindName("OpenWithDoubleClickBox");
-                            Assert.True(box.IsChecked);
-                            using (var locked = new FileStream(store.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                                box.IsChecked = false;
-                            Assert.True(box.IsChecked);
-                            Assert.Contains("Could not save", ((TextBlock)dialog.FindName("SaveStatus")).Text);
-                            box.IsChecked = false;
-                            Assert.False(store.LoadSettings().OpenWithDoubleClick);
-                            handled.SetResult();
-                        }
-                        catch (Exception ex) { handled.SetException(ex); }
-                        finally { dialog?.Close(); }
-                    }));
-                    ((MenuItem)window.FindName("AppearanceMenuItem")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-                    await handled.Task;
+                    ((ListBoxItem)window.FindName("SettingsNavigationItem")).IsSelected = true;
+                    await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                    var view = Assert.IsType<SettingsView>(((ContentControl)window.FindName("SettingsContent")).Content);
+                    var box = (CheckBox)view.FindName("OpenWithDoubleClickBox");
+                    Assert.True(box.IsChecked);
+                    using (var locked = new FileStream(store.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        box.IsChecked = false;
+                    Assert.True(box.IsChecked);
+                    Assert.Contains("Could not save", ((TextBlock)view.FindName("SaveStatus")).Text);
+                    box.IsChecked = false;
+                    Assert.False(store.LoadSettings().OpenWithDoubleClick);
                 }
                 opened.Clear();
                 var names = new[] { "UsageGrid", "DuplicatesGrid", "LargeFilesGrid" };

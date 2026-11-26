@@ -32,6 +32,7 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
         <Style x:Key="NavigationItem" TargetType="ListBoxItem" BasedOn="{StaticResource DefaultListBoxItemStyle}">
+            <Setter Property="DockPanel.Dock" Value="Top"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -70,6 +71,9 @@
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorBaseAltBrush}"/>
                     <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.55"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -233,6 +237,16 @@
                      AutomationProperties.Name="Main navigation"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      KeyboardNavigation.DirectionalNavigation="Contained">
+                <ListBox.Template>
+                    <ControlTemplate TargetType="ListBox">
+                        <ItemsPresenter/>
+                    </ControlTemplate>
+                </ListBox.Template>
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <DockPanel LastChildFill="False"/>
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
                 <ListBoxItem ToolTip="Space usage" AutomationProperties.Name="Space usage">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE9D9;" Style="{StaticResource NavigationIcon}"/>
@@ -263,9 +277,16 @@
                         <TextBlock Text="{Binding IssueHeader}" Style="{StaticResource NavigationLabel}"/>
                     </StackPanel>
                 </ListBoxItem>
+                <ListBoxItem x:Name="SettingsNavigationItem" DockPanel.Dock="Bottom" ToolTip="Settings"
+                             AutomationProperties.Name="Settings" IsEnabled="{Binding Idle}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE713;" Style="{StaticResource NavigationIcon}"/>
+                        <TextBlock Text="Settings" Style="{StaticResource NavigationLabel}"/>
+                    </StackPanel>
+                </ListBoxItem>
             </ListBox>
         </Border>
-    <Grid Grid.Column="1" Margin="24,8,8,8">
+    <Grid Grid.Column="1" Margin="12,8,8,8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -273,29 +294,26 @@
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <DockPanel Margin="0,0,0,20">
-            <Menu DockPanel.Dock="Right" VerticalAlignment="Center" Background="Transparent"
-                  IsEnabled="{Binding Idle}" Margin="12,0,0,0" AutomationProperties.Name="Settings menu">
-                <MenuItem Header="_Settings">
-                    <MenuItem x:Name="AppearanceMenuItem" Header="_Preferences..." Click="Settings_Click"/>
-                </MenuItem>
-            </Menu>
-            <Border DockPanel.Dock="Left" Width="56" Height="56" CornerRadius="12" Margin="0,0,14,0"
+        <DockPanel Margin="0,0,0,12">
+            <Border DockPanel.Dock="Left" Width="40" Height="40" CornerRadius="8" Margin="0,0,12,0"
                     Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
-                <Image Source="Assets/OpenMoji-1F5C3.png" Width="36" Height="36" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <Image Source="Assets/OpenMoji-1F5C3.png" Width="28" Height="28" RenderOptions.BitmapScalingMode="HighQuality"/>
             </Border>
             <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="FolderSize" FontSize="28" FontWeight="SemiBold"/>
-                <TextBlock Text="Explore your storage. Find the space you can reclaim."
-                           Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,3,0,0"/>
+                <TextBlock Text="FolderSize" FontSize="24" FontWeight="SemiBold"/>
             </StackPanel>
         </DockPanel>
-        <Border Grid.Row="1" Style="{StaticResource Card}">
+        <Border Grid.Row="1" Padding="12">
+        <Border.Style>
+            <Style TargetType="Border" BasedOn="{StaticResource Card}">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsSelected, ElementName=SettingsTab}" Value="True">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
         <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -303,26 +321,40 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.ColumnSpan="5" Text="Choose a folder" FontWeight="SemiBold" Margin="0,0,0,10"/>
-            <TextBox x:Name="FolderBox" Grid.Row="1" Text="{Binding FolderPath, UpdateSourceTrigger=PropertyChanged}"
+            <TextBox x:Name="FolderBox" Text="{Binding FolderPath, UpdateSourceTrigger=PropertyChanged}"
                      IsEnabled="{Binding Idle}" VerticalContentAlignment="Center" Padding="8,6" Margin="0,0,8,0"
-                     AutomationProperties.Name="Folder path" KeyDown="FolderBox_KeyDown"/>
-            <Button Grid.Row="1" Grid.Column="1" Content="Browse..." Click="Browse_Click" IsEnabled="{Binding Idle}"/>
-            <CheckBox x:Name="IncludeSubfoldersBox" Grid.Row="1" Grid.Column="2" Content="Include subfolders"
+                     AutomationProperties.Name="Folder path" ToolTip="Choose a folder to scan" KeyDown="FolderBox_KeyDown"/>
+            <Button Grid.Column="1" Content="Browse..." Click="Browse_Click" IsEnabled="{Binding Idle}"/>
+            <CheckBox x:Name="IncludeSubfoldersBox" Grid.Column="2" Content="Include subfolders"
                       IsChecked="{Binding Recursive}" Click="IncludeSubfolders_Click"
                       IsEnabled="{Binding Idle}" VerticalAlignment="Center" Margin="4,0,18,0"/>
-            <Button x:Name="ScanButton" Grid.Row="1" Grid.Column="3" Content="Scan" Style="{StaticResource PrimaryButton}"
+            <Button x:Name="ScanButton" Grid.Column="3" Content="Scan" Style="{StaticResource PrimaryButton}"
                     Click="Scan_Click" IsEnabled="{Binding Idle}"/>
-            <Button Grid.Row="1" Grid.Column="4" Content="Cancel" Click="Cancel_Click" IsEnabled="{Binding Busy}" Margin="0"/>
+            <Button Grid.Column="4" Content="Cancel" Click="Cancel_Click" IsEnabled="{Binding Busy}" Margin="0"/>
         </Grid>
         </Border>
-        <TextBlock Grid.Row="2" Text="{Binding Summary}" Margin="2,16" Foreground="{DynamicResource SecondaryTextBrush}"
-                   TextWrapping="Wrap"/>
-        <TabControl x:Name="MainSections" Grid.Row="3" Background="Transparent">
+        <TextBlock Grid.Row="2" Text="{Binding Summary}" Margin="2,10" Foreground="{DynamicResource SecondaryTextBrush}"
+                   TextWrapping="Wrap">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsSelected, ElementName=SettingsTab}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+        <TabControl x:Name="MainSections" Grid.Row="3" Background="Transparent" SelectedIndex="0"
+                    SelectionChanged="MainSections_SelectionChanged">
             <TabControl.Template>
                 <ControlTemplate TargetType="TabControl">
-                    <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"
-                                      KeyboardNavigation.TabNavigation="Local"/>
+                    <Grid>
+                        <!-- Keep native selection and Ctrl+Tab without showing top-level tab headers. -->
+                        <ItemsPresenter Height="0" Visibility="Hidden"/>
+                        <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"
+                                          KeyboardNavigation.TabNavigation="Local"/>
+                    </Grid>
                 </ControlTemplate>
             </TabControl.Template>
             <TabItem Header="Space usage">
@@ -539,6 +571,11 @@
                         <DataGridTextColumn Header="Details" Binding="{Binding Message}" Width="2*"/>
                     </DataGrid.Columns>
                 </DataGrid>
+                </Border>
+            </TabItem>
+            <TabItem x:Name="SettingsTab" Header="Settings" IsEnabled="{Binding Idle}">
+                <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                    <ContentControl x:Name="SettingsContent" IsEnabled="{Binding Idle}"/>
                 </Border>
             </TabItem>
         </TabControl>

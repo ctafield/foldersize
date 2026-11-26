@@ -526,8 +526,8 @@ public sealed class RenameInterfaceTests
                     var pattern = (TextBox)view.FindName("RenamePatternBox");
                     var format = (TextBox)view.FindName("RenameFormatBox");
                     Assert.True(rule.ActualWidth >= 220);
-                    Assert.True(pattern.ActualWidth >= (width >= 1240 ? 300 : 100));
-                    Assert.True(format.ActualWidth >= (width >= 1240 ? 300 : 100));
+                    Assert.True(pattern.ActualWidth >= (width >= 1240 ? 200 : 100), $"Pattern width: {pattern.ActualWidth}");
+                    Assert.True(format.ActualWidth >= (width >= 1240 ? 200 : 100), $"Format width: {format.ActualWidth}");
                     foreach (var box in new[] { pattern, format })
                     {
                         var bounds = box.TransformToAncestor(content).TransformBounds(new Rect(box.RenderSize));

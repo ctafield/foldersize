@@ -60,23 +60,28 @@ public partial class MainWindow : Window
     }
 #pragma warning restore WPF0001
 
-    private void Settings_Click(object sender, RoutedEventArgs e)
+    private AppSettings CurrentSettings() => new()
     {
-        var settings = new AppSettings
+        Theme = selectedTheme,
+        OpenWithDoubleClick = openWithDoubleClick,
+        IncludeSubfolders = Model.Recursive,
+        StartScanningOnOpen = startScanningOnOpen
+    };
+
+    private void MainSections_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (e.Source != MainSections || SettingsTab?.IsSelected != true) return;
+        if (SettingsContent.Content is SettingsView view)
         {
-            Theme = selectedTheme,
-            OpenWithDoubleClick = openWithDoubleClick,
-            IncludeSubfolders = Model.Recursive,
-            StartScanningOnOpen = startScanningOnOpen
-        };
-        var dialog = new SettingsWindow(settingsStore, settings, updated =>
+            view.LoadSettings(CurrentSettings());
+            return;
+        }
+        SettingsContent.Content = new SettingsView(settingsStore, CurrentSettings(), updated =>
         {
             openWithDoubleClick = updated.OpenWithDoubleClick;
             startScanningOnOpen = updated.StartScanningOnOpen;
             ApplyTheme(updated.Theme);
-        }) { Owner = this };
-        ApplyTheme(selectedTheme);
-        dialog.ShowDialog();
+        });
     }
 
     private void Browse_Click(object sender, RoutedEventArgs e)
@@ -94,14 +99,9 @@ public partial class MainWindow : Window
         var enabled = IncludeSubfoldersBox.IsChecked == true;
         try
         {
-            settingsStore.Save(new AppSettings
-            {
-                Theme = selectedTheme,
-                OpenWithDoubleClick = openWithDoubleClick,
-                IncludeSubfolders = enabled,
-                StartScanningOnOpen = startScanningOnOpen
-            });
+            settingsStore.Save(CurrentSettings());
             includeSubfolders = enabled;
+            if (SettingsContent.Content is SettingsView view) view.LoadSettings(CurrentSettings());
         }
         catch (Exception ex) when (FileErrors.IsExpected(ex))
         {
