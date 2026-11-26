@@ -31,13 +31,13 @@ public partial class App : Application
             includeSubfolders: preferences.IncludeSubfolders, startScanningOnOpen: preferences.StartScanningOnOpen,
             windowPlacement: preferences.WindowPlacement);
         WindowPlacement.Track(window, settings, preferences.WindowPlacement);
-        if (e.Args.Length == 1) window.Model.FolderPath = e.Args[0];
+        var validFolder = e.Args.Length == 0 || window.Model.SelectFolder(e.Args[0]);
         MainWindow = window;
         window.Show();
         if (settingsError is not null)
             MessageBox.Show(window, settingsError, "Settings could not be loaded",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
-        if (preferences.StartScanningOnOpen) await window.Model.ScanAsync();
+        if (preferences.StartScanningOnOpen && validFolder) await window.Model.ScanAsync();
     }
 }
 

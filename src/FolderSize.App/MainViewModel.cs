@@ -7,6 +7,12 @@ using FolderSize.Core;
 
 namespace FolderSize.App;
 
+internal static class FolderPaths
+{
+    public static string Normalize(string path) =>
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+}
+
 public abstract class Observable : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -133,6 +139,21 @@ public sealed class MainViewModel : Observable
             if (Current is null) Changed(nameof(CurrentPath));
         }
     }
+    public bool SelectFolder(string path)
+    {
+        if (Busy) return false;
+        try
+        {
+            FolderPath = FolderPaths.Normalize(path);
+            return true;
+        }
+        catch (Exception ex) when (FileErrors.IsExpected(ex) || ex is ArgumentException or NotSupportedException)
+        {
+            Issues = [new(path, ex.Message)];
+            Status = $"Could not select the folder: {ex.Message}";
+            return false;
+        }
+    }
     public bool Recursive { get => recursive; set => Set(ref recursive, value); }
     public string Status { get => status; private set => Set(ref status, value); }
     public bool Busy
@@ -219,7 +240,7 @@ public sealed class MainViewModel : Observable
         Changed(nameof(Summary));
         try
         {
-            path = Path.GetFullPath(path);
+            path = FolderPaths.Normalize(path);
             FolderPath = path;
             var progress = Progress(operationId);
             scan = await Task.Run(() => new FolderScanner().Scan(path, recurse, progress, token), token);
@@ -271,7 +292,7 @@ public sealed class MainViewModel : Observable
 
     private void RecordNavigation(string path)
     {
-        path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        path = FolderPaths.Normalize(path);
         if (historyIndex >= 0 &&
             string.Equals(navigationHistory[historyIndex], path, StringComparison.OrdinalIgnoreCase)) return;
         navigationHistory.RemoveRange(historyIndex + 1, navigationHistory.Count - historyIndex - 1);
@@ -331,7 +352,7 @@ public sealed class MainViewModel : Observable
         DirectoryInfo? parentDirectory;
         try
         {
-            parentDirectory = Directory.GetParent(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)));
+            parentDirectory = Directory.GetParent(FolderPaths.Normalize(path));
         }
         catch (Exception ex) when (FileErrors.IsExpected(ex) || ex is ArgumentException or NotSupportedException)
         {

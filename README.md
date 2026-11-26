@@ -47,7 +47,7 @@ Extract `artifacts\FolderSize-win-x64.zip` and run `FolderSize.exe` inside the e
 2. Double-click `Explorer-Install.reg` and approve importing the entries. It adds **Scan with FolderSize** for both a folder and empty space inside a folder, for the current user only.
 3. Right-click a folder, or empty space in an open folder, and choose **Scan with FolderSize**. On Windows 11, use **Show more options**.
 
-The registration points to `G:\Dev\FolderSize\artifacts\FolderSize-win-x64\FolderSize.exe`. If you move the app, edit the executable paths in `Explorer-Install.reg` (preserving doubled backslashes and escaped quotes), then import it again. The folder argument ends with `\.` so quoted drive-root paths also work correctly. The app normalizes this argument before displaying or scanning it, so a drive root appears as `G:\`, not `G:\\.`.
+The registration points to `G:\Dev\FolderSize\artifacts\FolderSize-win-x64\FolderSize.exe`. If you move the app, edit the executable paths in `Explorer-Install.reg` (preserving doubled backslashes and escaped quotes), then import it again. The folder argument ends with `\.` so quoted drive-root paths also work correctly. Explorer/command-line arguments and folder-picker selections are normalized immediately, even with startup scanning disabled: a drive root appears as `G:\`, not `G:\\.`, and subfolders do not display the trailing `\.`. This does not start a scan or interfere with typing a path manually.
 
 To remove the menu entries, double-click `Explorer-Uninstall.reg`. Neither file is applied by building or running the app.
 

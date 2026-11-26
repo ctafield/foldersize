@@ -134,7 +134,10 @@ public partial class RenameView : UserControl
         browse.Click += (_, _) =>
         {
             var picker = new OpenFolderDialog { Title = "Choose conflict destination", InitialDirectory = model.ScopePath };
-            if (picker.ShowDialog(dialog) == true) path.Text = picker.FolderName;
+            if (picker.ShowDialog(dialog) != true) return;
+            try { path.Text = FolderPaths.Normalize(picker.FolderName); }
+            catch (Exception ex) when (FileErrors.IsExpected(ex) || ex is ArgumentException or NotSupportedException)
+            { error.Text = ex.Message; }
         };
         string? destination = null;
         var move = new Button { Content = "Move conflicts", Margin = new(0, 0, 8, 0), Padding = new(12, 6, 12, 6) };
@@ -143,7 +146,7 @@ public partial class RenameView : UserControl
             try
             {
                 if (!Path.IsPathFullyQualified(path.Text)) throw new ArgumentException("Enter a full folder path.");
-                var target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Text));
+                var target = FolderPaths.Normalize(path.Text);
                 if (files.Any(file => string.Equals(Path.GetDirectoryName(file.FullPath), target, StringComparison.OrdinalIgnoreCase)))
                     throw new ArgumentException("Choose a destination different from the source folders.");
                 destination = target;

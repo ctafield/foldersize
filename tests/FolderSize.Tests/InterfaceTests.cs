@@ -632,6 +632,56 @@ public sealed class InterfaceTests
         Assert.False(model.Busy);
     });
 
+    [Theory]
+    [InlineData(@"F:\.", @"F:\")]
+    [InlineData(@"F:\\.", @"F:\")]
+    [InlineData(@"F:\sharpemu-0.0.5-nexus-win-x64\.", @"F:\sharpemu-0.0.5-nexus-win-x64")]
+    [InlineData(@"F:\sharpemu-0.0.5-nexus-win-x64\", @"F:\sharpemu-0.0.5-nexus-win-x64")]
+    [InlineData(@"\\server\share\.", @"\\server\share")]
+    [InlineData(@"\\server\share\folder.name\.", @"\\server\share\folder.name")]
+    public Task SelectingAFolderNormalizesItsDisplayBeforeAnyScan(string selected, string expected) => Sta.Run(() =>
+    {
+        var model = new MainViewModel();
+        Assert.True(model.SelectFolder(selected));
+        Assert.Equal(expected, model.FolderPath);
+        Assert.Equal(expected, model.CurrentPath);
+        Assert.Null(model.Current);
+        Assert.Empty(model.Rows);
+        Assert.False(model.CanFind);
+        Assert.False(model.Busy);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task SelectingAnInvalidFolderReportsTheErrorAndKeepsThePreviousPath() => Sta.Run(() =>
+    {
+        var model = new MainViewModel();
+        var previous = model.FolderPath;
+        Assert.False(model.SelectFolder("invalid\0path"));
+        Assert.Equal(previous, model.FolderPath);
+        Assert.Single(model.Issues);
+        Assert.StartsWith("Could not select the folder:", model.Status);
+        Assert.False(model.Busy);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task SelectingAFolderDoesNotRescanOrDiscardCachedResults() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write(@"nested\file", "cached");
+        var model = new MainViewModel { FolderPath = folder.Root };
+        await model.ScanAsync();
+        var current = model.Current;
+        var rows = model.Rows;
+        Assert.True(model.SelectFolder(Path.Combine(folder.Root, "nested") + @"\."));
+        Assert.Equal(Path.Combine(folder.Root, "nested"), model.FolderPath);
+        Assert.Same(current, model.Current);
+        Assert.Same(rows, model.Rows);
+        Assert.True(model.CanFind);
+        Assert.False(model.Busy);
+    });
+
     [Fact]
     public Task ExplorerFolderArgumentDisplaysNormalizedPath() => Sta.Run(async () =>
     {

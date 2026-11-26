@@ -101,7 +101,7 @@ public partial class MainWindow : Window
             Title = "Choose a folder to scan",
             InitialDirectory = Model.FolderPath
         };
-        if (dialog.ShowDialog(this) == true) Model.FolderPath = dialog.FolderName;
+        if (dialog.ShowDialog(this) == true) Model.SelectFolder(dialog.FolderName);
     }
 
     private void IncludeSubfolders_Click(object sender, RoutedEventArgs e)
