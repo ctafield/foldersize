@@ -15,6 +15,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <AssemblyName>FolderSize</AssemblyName>
+    <Title>FolderSize</Title>
+    <Product>FolderSize</Product>
+    <Description>Windows folder-size explorer and exact duplicate finder.</Description>
+    <Company>Chris Field</Company>
+    <Authors>Chris Field</Authors>
+    <Copyright>Copyright (c) 2026 Chris Field</Copyright>
     <ApplicationIcon>Assets\FolderSize.ico</ApplicationIcon>
   </PropertyGroup>
 

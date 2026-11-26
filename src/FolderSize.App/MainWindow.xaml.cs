@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -34,6 +35,12 @@ public partial class MainWindow : Window
         Model = model ?? new MainViewModel();
         Model.Recursive = includeSubfolders;
         InitializeComponent();
+        var assembly = typeof(MainWindow).Assembly;
+        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? throw new InvalidOperationException("Application version metadata is missing.");
+        var copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright
+            ?? throw new InvalidOperationException("Application copyright metadata is missing.");
+        AppInfoText.Text = $"Version {version.Split('+')[0]}  |  {copyright}";
         ApplyTheme(theme);
         DataContext = Model;
         Map.NodeSelected += node =>

@@ -514,9 +514,17 @@
         </TabControl>
         <StackPanel Grid.Row="4" Margin="0,12,0,0">
             <ProgressBar Height="3" IsIndeterminate="{Binding Busy}" BorderThickness="0" AutomationProperties.Name="Operation progress"/>
-            <TextBlock x:Name="StatusText" Text="{Binding Status}" Margin="0,8,0,0" TextWrapping="Wrap"
-                       FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"
-                       AutomationProperties.LiveSetting="Polite"/>
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText" Text="{Binding Status}" TextWrapping="Wrap"
+                           FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"
+                           AutomationProperties.LiveSetting="Polite"/>
+                <TextBlock x:Name="AppInfoText" Grid.Column="1" Margin="16,0,0,0"
+                           FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"/>
+            </Grid>
         </StackPanel>
     </Grid>
     </Grid>

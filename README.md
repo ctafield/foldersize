@@ -196,6 +196,12 @@ This intentionally does not bundle .NET, trim WPF, or publish a single-file exec
 
 Traversal runs in a background worker; duplicate hashing and verification use bounded concurrency, at most 16 open file leases, and streamed reads. Custom `IFileAccess` implementations remain sequential unless they opt into `SupportsConcurrentReads`. The file tree and duplicate metadata stay in memory, so memory consumption still grows with entry count. There is no MFT indexing, persistent cache, live watching, allocated-size accounting, permanent deletion, or automatic cleanup.
 
+## Copyright
+
+Copyright (c) 2026 Chris Field
+
+The main window's bottom status bar shows the app's build version and copyright notice on every page.
+
 ## Icon attribution
 
 The app uses OpenMoji's ["card file box" (1F5C3)](https://openmoji.org/library/emoji-1F5C3/), designed by Sina Schulz, under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The original color PNG was resized and converted to a multi-resolution Windows icon. The artwork and converted icon retain that license; this attribution does not license the application's code. See [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt), also included in build and publish output.

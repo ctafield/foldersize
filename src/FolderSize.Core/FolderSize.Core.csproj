@@ -4,6 +4,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Title>FolderSize Core</Title>
+    <Product>FolderSize</Product>
+    <Description>Folder scanning, duplicate detection, and file management library.</Description>
+    <Company>Chris Field</Company>
+    <Authors>Chris Field</Authors>
+    <Copyright>Copyright (c) 2026 Chris Field</Copyright>
   </PropertyGroup>
 
 </Project>

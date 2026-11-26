@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -49,6 +50,20 @@ public sealed class InterfaceTests
             var settings = Assert.IsType<SettingsView>(((ContentControl)window.FindName("SettingsContent")).Content);
             Assert.Same(window, Window.GetWindow(settings));
             Assert.True(settings.IsVisible);
+            var appInfo = (TextBlock)window.FindName("AppInfoText");
+            Assert.True(appInfo.IsVisible);
+            var assembly = typeof(MainWindow).Assembly;
+            var version = Assert.IsType<AssemblyInformationalVersionAttribute>(
+                assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>());
+            var copyright = Assert.IsType<AssemblyCopyrightAttribute>(
+                assembly.GetCustomAttribute<AssemblyCopyrightAttribute>());
+            Assert.Equal($"Version {version.InformationalVersion.Split('+')[0]}  |  {copyright.Copyright}", appInfo.Text);
+            var infoBounds = appInfo.TransformToAncestor(window).TransformBounds(new Rect(appInfo.RenderSize));
+            var status = (TextBlock)window.FindName("StatusText");
+            var statusBounds = status.TransformToAncestor(window).TransformBounds(new Rect(status.RenderSize));
+            Assert.True(statusBounds.Right <= infoBounds.Left);
+            Assert.True(infoBounds.Right <= window.ActualWidth);
+            Assert.True(infoBounds.Bottom <= window.ActualHeight);
             Assert.Empty(window.OwnedWindows.Cast<Window>());
             Assert.False(((TextBox)window.FindName("FolderBox")).IsVisible);
             var settingsItem = (ListBoxItem)window.FindName("SettingsNavigationItem");

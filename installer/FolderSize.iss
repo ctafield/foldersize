@@ -1,3 +1,6 @@
+#define AppPublisher "Chris Field"
+#define AppCopyright "Copyright (c) 2026 Chris Field"
+
 #ifndef AppVersion
   #define AppVersion "1.0.0"
 #endif
@@ -12,6 +15,10 @@
 AppId={{E019DF81-392E-458D-A7B3-40F416DC1959}
 AppName=FolderSize
 AppVersion={#AppVersion}
+AppPublisher={#AppPublisher}
+AppCopyright={#AppCopyright}
+VersionInfoCompany={#AppPublisher}
+VersionInfoCopyright={#AppCopyright}
 DefaultDirName={localappdata}\Programs\FolderSize
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
