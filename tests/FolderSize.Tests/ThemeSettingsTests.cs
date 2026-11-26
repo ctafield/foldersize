@@ -7,6 +7,16 @@ namespace FolderSize.Tests;
 public sealed class ThemeSettingsTests
 {
     [Fact]
+    public void InvalidWindowBoundsAreReportedWithoutOverwritingSettings()
+    {
+        using var folder = new TestFolder();
+        var json = """{"Theme":"Light","WindowPlacement":{"Left":100,"Top":100,"Right":50,"Bottom":500}}""";
+        var path = folder.Write("settings.json", json);
+        Assert.Throws<InvalidDataException>(() => new ThemeSettingsStore(path).LoadSettings());
+        Assert.Equal(json, File.ReadAllText(path));
+    }
+
+    [Fact]
     public void StartupScanningDefaultsToEnabledAndPersistsAcrossThemeChanges()
     {
         using var folder = new TestFolder();

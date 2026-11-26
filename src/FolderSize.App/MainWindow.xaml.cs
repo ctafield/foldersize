@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private bool openWithDoubleClick;
     private bool includeSubfolders;
     private bool startScanningOnOpen;
+    private readonly WindowPlacement? windowPlacement;
     private readonly FileOpener fileOpener;
     public MainViewModel Model { get; }
 
@@ -22,12 +23,13 @@ public partial class MainWindow : Window
 
     public MainWindow(ThemeSettingsStore settingsStore, AppTheme theme, bool openWithDoubleClick = true,
         FileOpener? fileOpener = null, MainViewModel? model = null, bool includeSubfolders = true,
-        bool startScanningOnOpen = true)
+        bool startScanningOnOpen = true, WindowPlacement? windowPlacement = null)
     {
         this.settingsStore = settingsStore;
         this.openWithDoubleClick = openWithDoubleClick;
         this.includeSubfolders = includeSubfolders;
         this.startScanningOnOpen = startScanningOnOpen;
+        this.windowPlacement = windowPlacement;
         this.fileOpener = fileOpener ?? new FileOpener();
         Model = model ?? new MainViewModel();
         Model.Recursive = includeSubfolders;
@@ -65,7 +67,8 @@ public partial class MainWindow : Window
         Theme = selectedTheme,
         OpenWithDoubleClick = openWithDoubleClick,
         IncludeSubfolders = Model.Recursive,
-        StartScanningOnOpen = startScanningOnOpen
+        StartScanningOnOpen = startScanningOnOpen,
+        WindowPlacement = windowPlacement
     };
 
     private void MainSections_SelectionChanged(object sender, SelectionChangedEventArgs e)

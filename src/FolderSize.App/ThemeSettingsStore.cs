@@ -17,6 +17,7 @@ public sealed record AppSettings
     public bool OpenWithDoubleClick { get; init; } = true;
     public bool IncludeSubfolders { get; init; } = true;
     public bool StartScanningOnOpen { get; init; } = true;
+    public WindowPlacement? WindowPlacement { get; init; }
 }
 
 public sealed class ThemeSettingsStore
@@ -48,6 +49,7 @@ public sealed class ThemeSettingsStore
         var settings = JsonSerializer.Deserialize<AppSettings>(json, Options);
         if (settings is null || !Enum.IsDefined(settings.Theme))
             throw new InvalidDataException("The saved theme is not supported.");
+        settings.WindowPlacement?.Validate();
         return settings;
     }
 
@@ -60,6 +62,7 @@ public sealed class ThemeSettingsStore
     public void Save(AppSettings settings)
     {
         if (!Enum.IsDefined(settings.Theme)) throw new ArgumentOutOfRangeException(nameof(settings));
+        settings.WindowPlacement?.Validate();
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         var temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try

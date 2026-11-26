@@ -6,6 +6,8 @@ The interface uses Microsoft's built-in WPF Fluent theme, supports Windows light
 
 ### Settings
 
+The main window remembers its size and screen position when you close it normally, stored in the same settings file. Maximized windows reopen maximized, preserving their previous normal size; minimized windows never reopen minimized. Windows adjusts a saved position that is completely off-screen after a monitor is disconnected or the display layout changes. Existing settings without window bounds keep the default size and position.
+
 Select **Settings** at the bottom of the left menu to open preferences inside the main window. Choose **System**, **Light**, or **Dark** and configure **Open with Double Click** and **Start scanning when app is opened**. System is the default and follows Windows. Changes apply immediately to the app and its dialogs and are saved automatically in `%LOCALAPPDATA%\FolderSize\settings.json`, including when the app is launched from Explorer or a portable folder. Select another menu item when finished; there is no separate Save button. Settings are unavailable during an operation.
 
 If settings cannot be saved, the previous choices are retained and the Settings page displays the error. Invalid or unreadable settings produce a startup warning and use defaults for that session without silently overwriting the saved file.

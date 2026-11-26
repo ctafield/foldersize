@@ -28,7 +28,9 @@ public partial class App : Application
         }
 
         var window = new MainWindow(settings, preferences.Theme, preferences.OpenWithDoubleClick,
-            includeSubfolders: preferences.IncludeSubfolders, startScanningOnOpen: preferences.StartScanningOnOpen);
+            includeSubfolders: preferences.IncludeSubfolders, startScanningOnOpen: preferences.StartScanningOnOpen,
+            windowPlacement: preferences.WindowPlacement);
+        WindowPlacement.Track(window, settings, preferences.WindowPlacement);
         if (e.Args.Length == 1) window.Model.FolderPath = e.Args[0];
         MainWindow = window;
         window.Show();
