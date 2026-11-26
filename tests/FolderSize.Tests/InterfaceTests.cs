@@ -416,7 +416,7 @@ public sealed class InterfaceTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public Task UpFromExplorerScanRootScansParentAndClearsOldDuplicates(bool recursive) => Sta.Run(async () =>
+    public Task UpFromExplorerScanRootSelectsParentWithoutScanningAndClearsOldResults(bool recursive) => Sta.Run(async () =>
     {
         using var folder = new TestFolder();
         folder.Write(@"parent\child\a", "same");
@@ -432,19 +432,69 @@ public sealed class InterfaceTests
         await model.ScanAsync();
         await model.FindAsync();
         Assert.Equal(2, model.DuplicateRows.Count);
+        model.LargeFileSize = "0";
+        await model.FindLargeFilesAsync();
+        Assert.NotEmpty(model.LargeFiles);
+        var changes = new List<string?>();
+        model.PropertyChanged += (_, e) => changes.Add(e.PropertyName);
         model.FolderPath = Path.Combine(folder.Root, "unscanned-edited-path");
         await model.UpAsync();
         Assert.Equal(parentPath, model.FolderPath);
         Assert.Equal(parentPath, model.CurrentPath);
-        Assert.Contains(model.Rows, row => row.Name == "sibling");
+        Assert.Null(model.Current);
+        Assert.Empty(model.Rows);
+        Assert.Empty(model.LargeFiles);
+        Assert.Empty(model.MapGroups.Extensions);
         Assert.Empty(model.DuplicateRows);
         Assert.False(model.CanRecycle);
-        Assert.True(model.CanFind);
-        Assert.Equal(recursive, Assert.Single(model.Rows, row => row.Kind == "Folder").Node.IsScanned);
+        Assert.False(model.CanFind);
+        Assert.False(model.Busy);
+        Assert.Contains(nameof(MainViewModel.CanFind), changes);
+        Assert.Contains(nameof(MainViewModel.Summary), changes);
+        Assert.Contains(nameof(MainViewModel.CurrentPath), changes);
         await model.UpAsync();
         Assert.Equal(folder.Root, model.FolderPath);
         Assert.Equal(folder.Root, model.CurrentPath);
+        Assert.Null(model.Current);
+        Assert.Empty(model.Rows);
+        await model.ScanAsync();
         Assert.Contains(model.Rows, row => row.Name == "outer");
+        Assert.Equal(recursive, Assert.Single(model.Rows, row => row.Kind == "Folder").Node.IsScanned);
+        Assert.True(model.CanFind);
+    });
+
+    [Theory]
+    [InlineData(true, @"\.")]
+    [InlineData(false, @"\.")]
+    [InlineData(true, @"\")]
+    [InlineData(false, @"\")]
+    public Task UpBeforeFirstScanSelectsTheLaunchFoldersParentWithoutScanning(bool recursive, string suffix) => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write(@"parent\child\file.txt", "child");
+        folder.Write(@"parent\sibling.txt", "sibling");
+        var parent = Path.Combine(folder.Root, "parent");
+        var model = new MainViewModel { FolderPath = Path.Combine(parent, "child") + suffix, Recursive = recursive };
+        Assert.Null(model.Current);
+        await model.UpAsync();
+        Assert.Equal(parent, model.FolderPath);
+        Assert.Equal(parent, model.CurrentPath);
+        Assert.Null(model.Current);
+        Assert.Empty(model.Rows);
+        Assert.False(model.CanFind);
+        Assert.Equal(recursive, model.Recursive);
+        Assert.False(model.Busy);
+    });
+
+    [Fact]
+    public Task UpBeforeFirstScanReportsAnInvalidPath() => Sta.Run(async () =>
+    {
+        var model = new MainViewModel { FolderPath = "invalid\0path" };
+        await model.UpAsync();
+        Assert.StartsWith("Could not navigate to the parent folder:", model.Status);
+        Assert.Single(model.Issues);
+        Assert.Null(model.Current);
+        Assert.False(model.Busy);
     });
 
     [Fact]

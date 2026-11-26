@@ -121,7 +121,16 @@ public sealed class MainViewModel : Observable
         LargeFilesSummary = "Enter a minimum size and select Show files. Uses the completed scan, not just the current folder.";
     }
 
-    public string FolderPath { get => folderPath; set => Set(ref folderPath, value); }
+    public string FolderPath
+    {
+        get => folderPath;
+        set
+        {
+            if (folderPath == value) return;
+            Set(ref folderPath, value);
+            if (Current is null) Changed(nameof(CurrentPath));
+        }
+    }
     public bool Recursive { get => recursive; set => Set(ref recursive, value); }
     public string Status { get => status; private set => Set(ref status, value); }
     public bool Busy
@@ -140,7 +149,7 @@ public sealed class MainViewModel : Observable
     public bool Idle => !Busy;
     public bool CanFind => Idle && scan is not null;
     public bool CanRecycle => Idle && selectedCount > 0;
-    public string CurrentPath => current?.FullPath ?? "";
+    public string CurrentPath => current?.FullPath ?? FolderPath;
     public string Summary => scan is null ? "Logical sizes - not allocated disk space" :
         $"{SizeText.Format(scan.Root.Size)}  |  {scan.FileCount:N0} files  |  logical sizes" +
         (scan.Root.HasErrors ? " (partial; see Issues)" : "");
@@ -243,17 +252,32 @@ public sealed class MainViewModel : Observable
 
     public async Task UpAsync()
     {
-        if (Busy || Current is null) return;
-        if (Current.Parent is { } parent)
+        if (Busy) return;
+        if (Current?.Parent is { } parent)
         {
             await NavigateAsync(parent);
             return;
         }
 
-        var parentDirectory = Directory.GetParent(Path.TrimEndingDirectorySeparator(Current.FullPath));
+        var path = Current?.FullPath ?? FolderPath;
+        DirectoryInfo? parentDirectory;
+        try
+        {
+            parentDirectory = Directory.GetParent(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)));
+        }
+        catch (Exception ex) when (FileErrors.IsExpected(ex) || ex is ArgumentException or NotSupportedException)
+        {
+            Issues = [new(path, ex.Message)];
+            Status = $"Could not navigate to the parent folder: {ex.Message}";
+            return;
+        }
         if (parentDirectory is null) return;
+        InvalidateScan();
+        Issues = [];
         FolderPath = parentDirectory.FullName;
-        await ScanAsync();
+        Status = "Parent folder selected. Choose Scan to measure its contents.";
+        Changed(nameof(Summary));
+        Changed(nameof(CanFind));
     }
     public Task RootAsync() => NavigateAsync(scan?.Root);
 

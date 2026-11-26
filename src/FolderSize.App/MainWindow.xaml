@@ -9,12 +9,12 @@
         Title="FolderSize" Icon="Assets/FolderSize.ico" Height="820" Width="1240" MinWidth="820" MinHeight="640"
         ThemeMode="System" Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
         FontFamily="Segoe UI Variable, Segoe UI" FontSize="14"
-        Foreground="{DynamicResource WindowForeground}" UseLayoutRounding="True"
+        Foreground="{DynamicResource TextFillColorPrimaryBrush}" UseLayoutRounding="True"
         Closing="Window_Closing" SizeChanged="Window_SizeChanged">
     <Window.Resources>
-        <SolidColorBrush x:Key="SecondaryTextBrush" Color="{DynamicResource TextFillColorPrimary}"/>
-        <SolidColorBrush x:Key="CardBrush" Color="{DynamicResource ControlSolidFillColorDefault}"/>
-        <SolidColorBrush x:Key="CardBorderBrush" Color="{DynamicResource ControlStrongStrokeColorDefault}"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="{DynamicResource TextFillColorSecondary}"/>
+        <SolidColorBrush x:Key="CardBrush" Color="{DynamicResource CardBackgroundFillColorDefault}"/>
+        <SolidColorBrush x:Key="CardBorderBrush" Color="{DynamicResource CardStrokeColorDefault}"/>
         <Style x:Key="NavigationLabel" TargetType="TextBlock">
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="12,0,0,0"/>
@@ -66,80 +66,18 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"/>
+                    <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}"/>
                 </Trigger>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorBaseAltBrush}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                    <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}"/>
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
                     <Setter Property="Opacity" Value="0.55"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
-        <Style x:Key="ContrastDataGridRow" TargetType="DataGridRow" BasedOn="{StaticResource DefaultDataGridRowStyle}">
-            <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="DataGridRow">
-                        <!-- The Fluent row template uses a transparent fill instead of the row background. -->
-                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}" SnapsToDevicePixels="True">
-                            <primitives:SelectiveScrollingGrid>
-                                <primitives:SelectiveScrollingGrid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </primitives:SelectiveScrollingGrid.ColumnDefinitions>
-                                <primitives:SelectiveScrollingGrid.RowDefinitions>
-                                    <RowDefinition Height="*"/>
-                                    <RowDefinition Height="Auto"/>
-                                </primitives:SelectiveScrollingGrid.RowDefinitions>
-                                <primitives:DataGridCellsPresenter Grid.Column="1" ItemsPanel="{TemplateBinding ItemsPanel}"
-                                                                   SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
-                                <primitives:DataGridDetailsPresenter Grid.Column="1" Grid.Row="1"
-                                                                    Visibility="{TemplateBinding DetailsVisibility}"/>
-                                <primitives:DataGridRowHeader Grid.RowSpan="2"
-                                    primitives:SelectiveScrollingGrid.SelectiveScrollingOrientation="Vertical"/>
-                            </primitives:SelectiveScrollingGrid>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="ItemsControl.AlternationIndex" Value="1">
-                    <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorBaseBrush}"/>
-                </Trigger>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorBaseAltBrush}"/>
-                    <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}"/>
-                </Trigger>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource AccentButtonBackground}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource AccentButtonForeground}"/>
-                    <Setter Property="BorderBrush" Value="{DynamicResource AccentButtonBackground}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
         <Style TargetType="primitives:DataGridColumnHeader" BasedOn="{StaticResource DefaultDataGridColumnHeaderStyle}">
-            <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorBaseAltBrush}"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}"/>
-            <Setter Property="BorderThickness" Value="0,0,0,1"/>
-            <Setter Property="SeparatorBrush" Value="{DynamicResource CardBorderBrush}"/>
-            <Setter Property="SeparatorVisibility" Value="Visible"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"/>
-                    <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}"/>
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource AccentButtonBackground}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource AccentButtonForeground}"/>
-                </Trigger>
-            </Style.Triggers>
         </Style>
         <Style TargetType="TabItem" BasedOn="{StaticResource DefaultTabItemStyle}">
             <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
@@ -172,14 +110,11 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"/>
-                    <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}"/>
+                    <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}"/>
                 </Trigger>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorBaseAltBrush}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                    <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}"/>
                     <Setter Property="FontWeight" Value="SemiBold"/>
-                    <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}"/>
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
                     <Setter Property="Opacity" Value="0.55"/>
@@ -220,8 +155,6 @@
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="RowHeight" Value="36"/>
-            <Setter Property="AlternationCount" Value="2"/>
-            <Setter Property="RowStyle" Value="{StaticResource ContrastDataGridRow}"/>
             <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
         </Style>
     </Window.Resources>
@@ -416,7 +349,7 @@
                                 </DataGridTemplateColumn>
                             </DataGrid.Columns>
                             <DataGrid.RowStyle>
-                                <Style TargetType="DataGridRow" BasedOn="{StaticResource ContrastDataGridRow}">
+                                <Style TargetType="DataGridRow" BasedOn="{StaticResource DefaultDataGridRowStyle}">
                                     <Setter Property="ToolTip" Value="{Binding FullPath}"/>
                                 </Style>
                             </DataGrid.RowStyle>

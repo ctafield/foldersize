@@ -59,12 +59,12 @@ You can also open a folder from the command line; scanning starts automatically 
 
 ## Explore space usage
 
-Light and dark themes use contrasting panels and borders, stronger labels, distinct table headers, alternating row shading, and accent-colored selection/hover outlines. The selected navigation item has a contrasting background and a left accent indicator. The space map's local tabs retain their accent underline. These styles follow the selected appearance, including System mode.
+Light and dark themes follow Microsoft's [Windows design principles](https://learn.microsoft.com/en-us/windows/apps/design/design-principles), using native WPF Fluent controls, softly layered panels, subtle borders, and readable primary/secondary text. Tables use native headers and selection states without alternating stripes or custom hover outlines. Navigation uses a subtle selected surface and a left accent indicator; the space map's local tabs retain their accent underline. Accent color is reserved for important actions, selection indicators, and keyboard focus. These styles follow the selected appearance, including System mode.
 
 1. Browse to a folder or paste its path, then select **Scan**. **Browse...** opens at the folder currently entered in the path box.
 2. **Include subfolders** is enabled by default and your choice is saved automatically between sessions. Turn it off to measure immediate files only; subfolders will say **Not scanned**. If saving fails, the previous choice is restored and an error is shown.
 3. Sort by clicking column headings. The initial order is largest first.
-4. Double-click a measured folder in the list or treemap to open it. **Up** moves to its parent; at the scan root it starts a new scan of the parent folder using the current recursion setting and clears the old duplicate results. This also works when opened from Explorer. At a drive/share root there is no parent. **Scan root** returns to the root of the current scan. Enter also opens a selected folder in the list.
+4. Double-click a measured folder in the list or treemap to open it. **Up** moves to its parent without starting a scan. Within the completed scan, it shows cached results. Outside the scan root, it selects the parent and clears the old results; choose **Scan** when ready to measure that folder. Before the first scan, **Up** uses the folder in the path box, including when launched from Explorer with automatic startup scanning disabled. At a drive/share root there is no parent. **Scan root** returns to the root of the current scan. Enter also opens a selected folder in the list.
 5. Select an entry to highlight it in the treemap. Hover for its path and size. Tiny entries are combined into a labeled **Other** tile to bound drawing work; they remain individually available in the list.
 6. **Cancel** stops scanning or duplicate discovery. Cancelled operations do not enable actions on incomplete results.
 

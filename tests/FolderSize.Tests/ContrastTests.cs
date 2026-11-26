@@ -93,7 +93,7 @@ public sealed class ContrastTests
     });
 
     [Fact]
-    public Task TablesAndNavigationStayDistinctWhenSwitchingThemes() => Sta.Run(async () =>
+    public Task FluentSurfacesStaySubtleAndTextReadableWhenSwitchingThemes() => Sta.Run(async () =>
     {
         using var folder = new TestFolder();
         folder.Write("a.txt", new string('x', 2048));
@@ -115,11 +115,11 @@ public sealed class ContrastTests
 #pragma warning restore WPF0001
                 await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
                 var background = ColorOf(window.Background);
-                var card = ColorOf((Brush)window.FindResource("CardBrush"));
+                var card = Composite(ColorOf((Brush)window.FindResource("CardBrush")), background);
                 Assert.Equal(dark, background.R < 128);
-                AssertRatio(card, background, 1.15);
+                Assert.InRange(Ratio(card, background), 1, 1.5);
                 AssertRatio(ColorOf((Brush)window.FindResource("SecondaryTextBrush")), card, 4.5);
-                AssertRatio(ColorOf((Brush)window.FindResource("CardBorderBrush")), card, 3);
+                Assert.InRange(Ratio(ColorOf((Brush)window.FindResource("CardBorderBrush")), card), 1, 1.5);
 
                 var names = new[] { "UsageGrid", "DuplicatesGrid", "LargeFilesGrid" };
                 for (var index = 0; index < names.Length; index++)
@@ -132,27 +132,30 @@ public sealed class ContrastTests
                     window.UpdateLayout();
                     var first = Assert.IsType<DataGridRow>(grid.ItemContainerGenerator.ContainerFromIndex(0));
                     var second = Assert.IsType<DataGridRow>(grid.ItemContainerGenerator.ContainerFromIndex(1));
-                    AssertRatio(ColorOf(first.Background), ColorOf(second.Background), 1.08);
-                    AssertRatio(ColorOf(first.Foreground), ColorOf(first.Background), 4.5);
-                    AssertRatio(ColorOf(second.Foreground), ColorOf(second.Background), 4.5);
-                    var rowBorder = Assert.IsType<Border>(VisualTreeHelper.GetChild(first, 0));
-                    Assert.Equal(ColorOf(first.Background), ColorOf(rowBorder.Background));
+                    var rowBackground = Composite(ColorOf(first.Background), card);
+                    Assert.Equal(rowBackground, Composite(ColorOf(second.Background), card));
+                    AssertRatio(ColorOf(first.Foreground), rowBackground, 4.5);
+                    AssertRatio(ColorOf(second.Foreground), rowBackground, 4.5);
 
                     var header = Descendants<DataGridColumnHeader>(grid).First(item => item.Column is not null);
-                    AssertRatio(ColorOf(header.Foreground), ColorOf(header.Background), 4.5);
-                    AssertRatio(ColorOf(header.Background), card, 1.2);
+                    var headerBackground = Composite(ColorOf(header.Background), card);
+                    AssertRatio(ColorOf(header.Foreground), headerBackground, 4.5);
+                    Assert.InRange(Ratio(headerBackground, card), 1, 1.5);
                     grid.SelectedItem = grid.Items[0];
                     window.UpdateLayout();
-                    AssertRatio(ColorOf(first.Background), card, 3);
-                    AssertRatio(ColorOf(first.Foreground), ColorOf(first.Background), 4.5);
                     var cell = Descendants<DataGridCell>(first).First();
-                    AssertRatio(ColorOf(cell.Foreground), ColorOf(first.Background), 4.5);
+                    var cellBorder = Assert.IsType<Border>(cell.Template.FindName("Border", cell));
+                    var selectedBackground = Composite(ColorOf(cellBorder.Background), card);
+                    Assert.NotEqual(card, selectedBackground);
+                    AssertRatio(ColorOf(cell.Foreground), selectedBackground, 4.5);
 
                     var item = (ListBoxItem)navigation.Items[index];
                     var indicator = Assert.IsType<Border>(item.Template.FindName("ActiveIndicator", item));
                     Assert.Equal(Visibility.Visible, indicator.Visibility);
-                    AssertRatio(ColorOf(item.Foreground), ColorOf(item.Background), 4.5);
-                    AssertRatio(ColorOf(indicator.Background), ColorOf(item.Background), 3);
+                    var selectedSurface = Composite(ColorOf(item.Background), background);
+                    Assert.InRange(Ratio(selectedSurface, background), 1, 1.5);
+                    AssertRatio(ColorOf(item.Foreground), selectedSurface, 4.5);
+                    AssertRatio(ColorOf(indicator.Background), selectedSurface, 3);
                     var unselected = (ListBoxItem)navigation.Items[(index + 1) % navigation.Items.Count];
                     Assert.NotEqual(ColorOf(item.Background), ColorOf(unselected.Background));
                     Assert.Equal(Visibility.Collapsed,
@@ -167,15 +170,24 @@ public sealed class ContrastTests
 
     private static void AssertRatio(Color foreground, Color background, double minimum)
     {
+        var ratio = Ratio(foreground, background);
+        Assert.True(ratio >= minimum, $"{foreground} on {background}: {ratio:F2}:1, expected at least {minimum}:1");
+    }
+
+    private static Color Composite(Color foreground, Color background)
+    {
         var alpha = foreground.A / 255.0;
-        var composite = Color.FromRgb(
+        return Color.FromRgb(
             (byte)Math.Round(foreground.R * alpha + background.R * (1 - alpha)),
             (byte)Math.Round(foreground.G * alpha + background.G * (1 - alpha)),
             (byte)Math.Round(foreground.B * alpha + background.B * (1 - alpha)));
-        var first = Luminance(composite);
+    }
+
+    private static double Ratio(Color foreground, Color background)
+    {
+        var first = Luminance(Composite(foreground, background));
         var second = Luminance(background);
-        var ratio = (Math.Max(first, second) + 0.05) / (Math.Min(first, second) + 0.05);
-        Assert.True(ratio >= minimum, $"{foreground} on {background}: {ratio:F2}:1, expected at least {minimum}:1");
+        return (Math.Max(first, second) + 0.05) / (Math.Min(first, second) + 0.05);
     }
 
     private static double Luminance(Color color)
