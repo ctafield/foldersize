@@ -138,13 +138,31 @@ public sealed class DuplicateTests
         Assert.Empty(Find(folder, false).Groups);
     }
 
-    [Fact]
-    public void EmptyDuplicatesHaveNoExtraBytes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ZeroByteFilesAreExcludedBeforeReadingWithoutAffectingNonemptyDuplicates(bool includeNonempty)
     {
         using var folder = new TestFolder();
-        folder.Write("a", "");
-        folder.Write("b", "");
-        Assert.Equal(0, Assert.Single(Find(folder).Groups).ExtraBytes);
+        var emptyPaths = new[] { folder.Write("a", ""), folder.Write("b", ""), folder.Write(@"nested\empty", "") };
+        string[] matches = includeNonempty ? [folder.Write("c", "x"), folder.Write(@"nested\d", "x")] : [];
+        var scan = new FolderScanner().Scan(folder.Root, true);
+        var access = new CountingAccess(concurrent: true);
+        var result = new DuplicateFinder(access).Find(scan);
+        Assert.Equal(3, scan.Root.Files().Count(file => file.Size == 0));
+        Assert.DoesNotContain(emptyPaths, path => access.OpenCounts.ContainsKey(path));
+        Assert.Empty(result.Issues);
+        if (includeNonempty)
+        {
+            var group = Assert.Single(result.Groups);
+            Assert.Equal(matches.Order(), group.Files.Select(file => file.Path).Order());
+            Assert.Equal(1, group.ExtraBytes);
+        }
+        else
+        {
+            Assert.Empty(result.Groups);
+            Assert.Empty(access.OpenCounts);
+        }
     }
 
     [Fact]

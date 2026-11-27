@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -17,6 +18,178 @@ namespace FolderSize.Tests;
 
 public sealed class InterfaceTests
 {
+    [Theory]
+    [InlineData(1240, AppTheme.Light)]
+    [InlineData(820, AppTheme.Dark)]
+    public Task DuplicateGroupsHaveDescriptiveCollapsibleHeadersWithoutMergingMatchingNames(double width, AppTheme theme) => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write(@"first\report.txt", "alpha");
+        folder.Write(@"second\report.txt", "alpha");
+        folder.Write(@"third\report.txt", "bravo");
+        folder.Write(@"fourth\report.txt", "bravo");
+        var opened = new List<string>();
+        var copied = new List<string>();
+        var window = new MainWindow(new ThemeSettingsStore(), theme, openWithDoubleClick: false,
+            fileOpener: new FileOpener(info => opened.Add(info.FileName)), copyToClipboard: copied.Add)
+        { Width = width, Height = 640 };
+        try
+        {
+            window.Show();
+            window.Model.FolderPath = folder.Root;
+            await window.Model.ScanAsync();
+            await window.Model.FindAsync();
+            ((ListBox)window.FindName("MainNavigation")).SelectedIndex = 1;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var grid = (DataGrid)window.FindName("DuplicatesGrid");
+            var view = CollectionViewSource.GetDefaultView(grid.ItemsSource);
+            var groups = view.Groups!.Cast<CollectionViewGroup>().ToArray();
+            Assert.Equal(2, groups.Length);
+            Assert.All(groups, group =>
+            {
+                var header = Assert.IsType<DuplicateGroupHeader>(group.Name);
+                Assert.Equal("report.txt", header.Name);
+                Assert.Equal("2 copies  |  5 B each  |  5 B extra logical bytes", header.Summary);
+                Assert.Equal(2, group.ItemCount);
+                Assert.All(group.Items.Cast<DuplicateRow>(), row => Assert.Same(header, row.Group));
+            });
+            Assert.NotEqual(groups[0].Name, groups[1].Name);
+            var headers = Descendants<System.Windows.Controls.Primitives.ToggleButton>(grid)
+                .Where(button => button.Name == "PART_Header").ToArray();
+            Assert.Equal(2, headers.Length);
+            Assert.All(headers, header =>
+            {
+                Assert.True(header.IsChecked);
+                var labels = Descendants<TextBlock>((Grid)header.Content).Select(label => label.Text).ToArray();
+                Assert.Contains("report.txt", labels);
+                Assert.Contains("2 copies  |  5 B each  |  5 B extra logical bytes", labels);
+                var bounds = header.TransformToAncestor(window).TransformBounds(new Rect(header.RenderSize));
+                Assert.True(bounds.Right <= window.ActualWidth);
+            });
+            var selected = window.Model.DuplicateRows.Select(row => row.Selected).ToArray();
+            var clicked = (DuplicateRow)groups[0].Items[1];
+            var row = Assert.IsType<DataGridRow>(grid.ItemContainerGenerator.ContainerFromItem(clicked));
+            var menu = row.ContextMenu;
+            menu.PlacementTarget = row;
+            menu.IsOpen = true;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert.Same(clicked, grid.SelectedItem);
+            var actions = menu.Items.OfType<MenuItem>().ToArray();
+            actions[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            actions[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Equal(clicked.Path, Assert.Single(opened));
+            Assert.Equal(clicked.Path, Assert.Single(copied));
+            menu.IsOpen = false;
+            headers[0].IsChecked = false;
+            window.UpdateLayout();
+            Assert.Equal(selected, window.Model.DuplicateRows.Select(row => row.Selected));
+            Assert.True(window.Model.KeepsOneCopy());
+            ((Button)window.FindName("InvertSelectionButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(selected.Select(value => !value), window.Model.DuplicateRows.Select(row => row.Selected));
+            Assert.True(window.Model.KeepsOneCopy());
+            headers[0].IsChecked = true;
+            view.SortDescriptions.Add(new(nameof(DuplicateRow.Path), ListSortDirection.Descending));
+            Assert.Equal(2, view.Groups.Count);
+            Assert.All(view.Groups.Cast<CollectionViewGroup>(), group => Assert.Equal(2, group.ItemCount));
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
+    public Task LargeDuplicateGroupsKeepRowsVirtualizedAndCanScrollToTheLastCopy() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        for (var i = 0; i < 300; i++) folder.Write($"{i:D3}.txt", "same");
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            window.Model.FolderPath = folder.Root;
+            await window.Model.ScanAsync();
+            await window.Model.FindAsync();
+            ((ListBox)window.FindName("MainNavigation")).SelectedIndex = 1;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var grid = (DataGrid)window.FindName("DuplicatesGrid");
+            Assert.Equal(300, grid.Items.Count);
+            Assert.InRange(Descendants<DataGridRow>(grid).Count(), 1, 200);
+            var last = window.Model.DuplicateRows[^1];
+            grid.ScrollIntoView(last);
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            Assert.Contains(Descendants<DataGridRow>(grid), row => row.Item == last);
+            Assert.InRange(Descendants<DataGridRow>(grid).Count(), 1, 200);
+        }
+        finally { window.Close(); }
+    });
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) yield return match;
+            foreach (var descendant in Descendants<T>(child)) yield return descendant;
+        }
+    }
+
+    [Fact]
+    public Task ScrollingAcrossManyDuplicateGroupsRemainsResponsive() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        for (var group = 0; group < 80; group++)
+            for (var copy = 0; copy < 2 + group % 10 * 8; copy++)
+                folder.Write($@"{group:D3}\{copy:D3}.txt", new string('x', group + 1));
+        var window = new MainWindow { Width = 820, Height = 640 };
+        try
+        {
+            window.Show();
+            window.Model.FolderPath = folder.Root;
+            await window.Model.ScanAsync();
+            await window.Model.FindAsync();
+            ((ListBox)window.FindName("MainNavigation")).SelectedIndex = 1;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var grid = (DataGrid)window.FindName("DuplicatesGrid");
+            var groups = CollectionViewSource.GetDefaultView(grid.ItemsSource).Groups!;
+            Assert.Equal(80, groups.Count);
+            var firstGroup = (CollectionViewGroup)groups[0];
+            var collapsed = Assert.IsType<DuplicateGroupHeader>(firstGroup.Name);
+            var selections = firstGroup.Items.Cast<DuplicateRow>().Select(row => row.Selected).ToArray();
+            collapsed.IsExpanded = false;
+            var accessibilityPeer = UIElementAutomationPeer.CreatePeerForElement(grid);
+            Assert.NotNull(accessibilityPeer);
+            var viewer = Descendants<ScrollViewer>(grid).First();
+            for (var step = 0; step < 100; step++)
+            {
+                var timer = Stopwatch.StartNew();
+                if (step < 40) viewer.PageDown();
+                else if (step < 80) viewer.PageUp();
+                else viewer.ScrollToVerticalOffset(viewer.ScrollableHeight * ((step * 17 % 20) / 19d));
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                window.UpdateLayout();
+                foreach (var peer in accessibilityPeer.GetChildren() ?? []) peer.GetChildren();
+                Assert.True(timer.Elapsed < TimeSpan.FromSeconds(1), $"Scroll {step} took {timer.Elapsed}.");
+                Assert.InRange(Descendants<DataGridRow>(grid).Count(), 0, 200);
+            }
+            viewer.ScrollToTop();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var headerButton = Descendants<System.Windows.Controls.Primitives.ToggleButton>(grid)
+                .Single(button => button.Name == "PART_Header" && button.DataContext is CollectionViewGroup group
+                    && group.Name == collapsed);
+            Assert.False(headerButton.IsChecked);
+            Assert.Equal(selections, firstGroup.Items.Cast<DuplicateRow>().Select(row => row.Selected));
+            var last = window.Model.DuplicateRows[^1];
+            grid.ScrollIntoView(last);
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            Assert.Contains(Descendants<DataGridRow>(grid), row => row.Item == last);
+        }
+        finally { window.Close(); }
+    });
+
     [Theory]
     [InlineData(1240)]
     [InlineData(820)]

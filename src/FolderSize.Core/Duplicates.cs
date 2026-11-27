@@ -47,7 +47,8 @@ public sealed class DuplicateFinder(IFileAccess access)
         var buckets = new Dictionary<(long Length, string Hash), List<DuplicateFile>>();
         var groups = new List<DuplicateGroup>();
         cancellationToken.ThrowIfCancellationRequested();
-        var candidates = scan.Root.Files().GroupBy(file => file.Size).Where(group => group.Count() > 1)
+        var candidates = scan.Root.Files().Where(file => file.Size > 0)
+            .GroupBy(file => file.Size).Where(group => group.Count() > 1)
             .SelectMany(group => group)
             .Select(file => new HashInput(file.FullPath, file.Size, file.LastWriteUtc, null)).ToArray();
         var sampled = HashCandidates(candidates, sample: true, "Sampling candidates (file sizes examined)",

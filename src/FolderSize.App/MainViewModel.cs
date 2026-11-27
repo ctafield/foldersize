@@ -40,14 +40,27 @@ public sealed class UsageRow(ScanNode node, long total) : Observable
     public string FullPath => Node.FullPath;
 }
 
-public sealed class DuplicateRow(int groupNumber, DuplicateFile file, int copies) : Observable
+public sealed class DuplicateGroupHeader(int number, string name, long fileBytes, int copies) : Observable
+{
+    private bool isExpanded = true;
+    public int Number { get; } = number;
+    public string Name { get; } = name;
+    public long FileBytes { get; } = fileBytes;
+    public int Copies { get; } = copies;
+    public bool IsExpanded { get => isExpanded; set => Set(ref isExpanded, value); }
+    public string Summary => $"{Copies:N0} copies  |  {SizeText.Format(FileBytes)} each  |  " +
+        $"{SizeText.Format(FileBytes * (Copies - 1))} extra logical bytes";
+}
+
+public sealed class DuplicateRow(DuplicateGroupHeader group, DuplicateFile file) : Observable
 {
     private bool selected;
     public DuplicateFile File { get; } = file;
-    public int GroupNumber { get; } = groupNumber;
+    public DuplicateGroupHeader Group { get; } = group;
+    public int GroupNumber => Group.Number;
     public string Path => File.Path;
     public string Size => SizeText.Format(File.Stamp.Length);
-    public int Copies { get; } = copies;
+    public int Copies => Group.Copies;
     public bool Selected { get => selected; set => Set(ref selected, value); }
 }
 
@@ -458,10 +471,14 @@ public sealed class MainViewModel : Observable
             duplicates = await Task.Run(() => new DuplicateFinder(new WindowsFileAccess()).Find(snapshot, progress, token), token);
             var result = duplicates;
             DuplicateRows = await Task.Run(() => result.Groups.SelectMany((group, index) =>
-                group.Files.Select((file, fileIndex) => new DuplicateRow(index + 1, file, group.Files.Count)
+            {
+                var header = new DuplicateGroupHeader(index + 1, Path.GetFileName(group.Files[0].Path),
+                    group.FileSize, group.Files.Count);
+                return group.Files.Select((file, fileIndex) => new DuplicateRow(header, file)
                 {
                     Selected = fileIndex > 0
-                })).ToArray());
+                });
+            }).ToArray());
             selectedCount = DuplicateRows.Count(row => row.Selected);
             foreach (var row in DuplicateRows) row.PropertyChanged += SelectionChanged;
             Issues = snapshot.Issues.Concat(result.Issues).ToArray();

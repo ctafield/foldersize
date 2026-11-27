@@ -12,6 +12,11 @@
         Foreground="{DynamicResource TextFillColorPrimaryBrush}" UseLayoutRounding="True"
         Closing="Window_Closing" SizeChanged="Window_SizeChanged" PreviewMouseDown="Window_PreviewMouseDown">
     <Window.Resources>
+        <CollectionViewSource x:Key="GroupedDuplicates" Source="{Binding DuplicateRows}">
+            <CollectionViewSource.GroupDescriptions>
+                <PropertyGroupDescription PropertyName="Group"/>
+            </CollectionViewSource.GroupDescriptions>
+        </CollectionViewSource>
         <Style x:Key="ContextMenuIcon" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
             <Setter Property="FontSize" Value="16"/>
@@ -576,16 +581,104 @@
                         <Button x:Name="InvertSelectionButton" Content="Invert selection" Click="InvertSelection_Click" IsEnabled="{Binding Idle}"/>
                     </WrapPanel>
                     <TextBlock Grid.Row="1" Text="{Binding DuplicateSummary}" Margin="0,0,0,10" TextWrapping="Wrap"/>
-                    <DataGrid x:Name="DuplicatesGrid" Grid.Row="2" ItemsSource="{Binding DuplicateRows}"
+                    <DataGrid x:Name="DuplicatesGrid" Grid.Row="2" ItemsSource="{Binding Source={StaticResource GroupedDuplicates}}"
                               RowStyle="{StaticResource FileRowStyle}"
+                              VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                              ScrollViewer.CanContentScroll="True"
                               MouseDoubleClick="FileGrid_DoubleClick"
                               IsEnabled="{Binding Idle}" AutomationProperties.Name="Exact duplicate files">
+                        <DataGrid.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.Panel>
+                                    <ItemsPanelTemplate>
+                                        <VirtualizingStackPanel/>
+                                    </ItemsPanelTemplate>
+                                </GroupStyle.Panel>
+                                <GroupStyle.ContainerStyle>
+                                    <Style TargetType="GroupItem">
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="GroupItem">
+                                                    <Border BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1"
+                                                            CornerRadius="6" Margin="0,6,0,6">
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="Auto"/>
+                                                                <RowDefinition Height="*"/>
+                                                            </Grid.RowDefinitions>
+                                                            <!-- Expander peers can hang WPF automation updates during virtualised group scrolling. -->
+                                                            <primitives:ToggleButton x:Name="PART_Header" Padding="8"
+                                                                    HorizontalContentAlignment="Stretch"
+                                                                    IsChecked="{Binding Name.IsExpanded, Mode=TwoWay}"
+                                                                    AutomationProperties.Name="{Binding Name.Name}"
+                                                                    AutomationProperties.HelpText="{Binding Name.Summary}">
+                                                                <primitives:ToggleButton.Template>
+                                                                    <ControlTemplate TargetType="primitives:ToggleButton">
+                                                                        <Border x:Name="HeaderBorder" Padding="{TemplateBinding Padding}"
+                                                                                Background="{DynamicResource CardBrush}"
+                                                                                BorderBrush="Transparent" BorderThickness="1" CornerRadius="6">
+                                                                            <Grid>
+                                                                                <Grid.ColumnDefinitions>
+                                                                                    <ColumnDefinition Width="*"/>
+                                                                                    <ColumnDefinition Width="24"/>
+                                                                                </Grid.ColumnDefinitions>
+                                                                                <ContentPresenter VerticalAlignment="Center"/>
+                                                                                <TextBlock x:Name="Chevron" Grid.Column="1" Text="&#xE76C;"
+                                                                                           Style="{StaticResource NavigationIcon}"/>
+                                                                            </Grid>
+                                                                        </Border>
+                                                                        <ControlTemplate.Triggers>
+                                                                            <Trigger Property="IsChecked" Value="True">
+                                                                                <Setter TargetName="Chevron" Property="Text" Value="&#xE70D;"/>
+                                                                            </Trigger>
+                                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                                <Setter TargetName="HeaderBorder" Property="Background"
+                                                                                        Value="{DynamicResource SubtleFillColorSecondaryBrush}"/>
+                                                                            </Trigger>
+                                                                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                                                                <Setter TargetName="HeaderBorder" Property="BorderBrush"
+                                                                                        Value="{DynamicResource AccentFillColorDefaultBrush}"/>
+                                                                            </Trigger>
+                                                                        </ControlTemplate.Triggers>
+                                                                    </ControlTemplate>
+                                                                </primitives:ToggleButton.Template>
+                                                                <Grid Margin="4,8,8,8" ToolTip="{Binding Name.Summary}">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="24"/>
+                                                                        <ColumnDefinition Width="*"/>
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Text="&#xE8C8;" Style="{StaticResource NavigationIcon}"/>
+                                                                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                                                        <TextBlock Text="{Binding Name.Name}" FontWeight="SemiBold"
+                                                                                   TextTrimming="CharacterEllipsis"/>
+                                                                        <TextBlock Text="{Binding Name.Summary}" FontSize="12" TextWrapping="Wrap"
+                                                                                   Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                                                    </StackPanel>
+                                                                </Grid>
+                                                            </primitives:ToggleButton>
+                                                            <ItemsPresenter Grid.Row="1">
+                                                                <ItemsPresenter.Style>
+                                                                    <Style TargetType="ItemsPresenter">
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Name.IsExpanded}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </ItemsPresenter.Style>
+                                                            </ItemsPresenter>
+                                                        </Grid>
+                                                    </Border>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </GroupStyle.ContainerStyle>
+                            </GroupStyle>
+                        </DataGrid.GroupStyle>
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="Recycle" Binding="{Binding Selected, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
-                            <DataGridTextColumn Header="Group" Binding="{Binding GroupNumber}" Width="65" IsReadOnly="True"/>
                             <DataGridTextColumn Header="Full path" Binding="{Binding Path}" Width="*" IsReadOnly="True"/>
-                            <DataGridTextColumn Header="Size each" Binding="{Binding Size}" SortMemberPath="File.Stamp.Length" Width="120" IsReadOnly="True"/>
-                            <DataGridTextColumn Header="Copies" Binding="{Binding Copies}" Width="65" IsReadOnly="True"/>
                         </DataGrid.Columns>
                     </DataGrid>
                     <TextBlock Grid.Row="3" Margin="0,14,0,0" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="12" TextWrapping="Wrap"
