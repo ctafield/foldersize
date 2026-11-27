@@ -43,7 +43,7 @@ public sealed class WindowPlacementTests
         Assert.Equal(expected, restored.WindowPlacement);
         Assert.False(restored.IncludeSubfolders);
         var reopened = new MainWindow(store, restored.Theme, includeSubfolders: restored.IncludeSubfolders,
-            windowPlacement: restored.WindowPlacement);
+            windowPlacement: restored.WindowPlacement, updateChecker: TestUpdates.NoUpdates);
         WindowPlacement.Track(reopened, store, restored.WindowPlacement);
         try
         {

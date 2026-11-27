@@ -243,7 +243,8 @@ public sealed class FileOpeningTests
         var store = new ThemeSettingsStore(Path.Combine(folder.Root, "preferences", "settings.json"));
         store.Save(AppTheme.Light);
         var opened = new List<string>();
-        var window = new MainWindow(store, AppTheme.Light, fileOpener: new FileOpener(info => opened.Add(info.FileName)));
+        var window = new MainWindow(store, AppTheme.Light, fileOpener: new FileOpener(info => opened.Add(info.FileName)),
+            updateChecker: TestUpdates.NoUpdates);
         try
         {
             window.Show();

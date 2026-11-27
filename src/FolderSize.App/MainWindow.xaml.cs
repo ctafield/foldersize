@@ -25,6 +25,9 @@ public partial class MainWindow : Window
     private readonly Action<string> copyToClipboard;
     private readonly Action<ProcessStartInfo> launchDiskCleanup;
     private readonly FolderWebSearch folderWebSearch;
+    private readonly AppUpdateChecker updateChecker;
+    private readonly Action<ProcessStartInfo>? launchReleases;
+    private readonly string appVersion;
     private readonly DispatcherTimer driveRefreshTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     public MainViewModel Model { get; }
 
@@ -33,7 +36,8 @@ public partial class MainWindow : Window
     public MainWindow(ThemeSettingsStore settingsStore, AppTheme theme, bool openWithDoubleClick = true,
         FileOpener? fileOpener = null, MainViewModel? model = null, bool includeSubfolders = true,
         bool startScanningOnOpen = true, WindowPlacement? windowPlacement = null, Action<string>? copyToClipboard = null,
-        Action<ProcessStartInfo>? launchDiskCleanup = null, FolderWebSearch? folderWebSearch = null)
+        Action<ProcessStartInfo>? launchDiskCleanup = null, FolderWebSearch? folderWebSearch = null,
+        AppUpdateChecker? updateChecker = null, Action<ProcessStartInfo>? launchReleases = null)
     {
         this.settingsStore = settingsStore;
         this.openWithDoubleClick = openWithDoubleClick;
@@ -43,6 +47,8 @@ public partial class MainWindow : Window
         this.fileOpener = fileOpener ?? new FileOpener();
         this.copyToClipboard = copyToClipboard ?? Clipboard.SetText;
         this.folderWebSearch = folderWebSearch ?? new FolderWebSearch();
+        this.updateChecker = updateChecker ?? new AppUpdateChecker();
+        this.launchReleases = launchReleases;
         this.launchDiskCleanup = launchDiskCleanup ?? (info =>
         {
             using var process = Process.Start(info)
@@ -52,11 +58,11 @@ public partial class MainWindow : Window
         Model.Recursive = includeSubfolders;
         InitializeComponent();
         var assembly = typeof(MainWindow).Assembly;
-        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        appVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             ?? throw new InvalidOperationException("Application version metadata is missing.");
         var copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright
             ?? throw new InvalidOperationException("Application copyright metadata is missing.");
-        AppInfoText.Text = $"Version {version.Split('+')[0]}  |  {copyright}";
+        AppInfoText.Text = $"Version {appVersion.Split('+')[0]}  |  {copyright}";
         ApplyTheme(theme);
         DataContext = Model;
         driveRefreshTimer.Tick += async (_, _) => await Model.RefreshDrivesAsync();
@@ -65,7 +71,11 @@ public partial class MainWindow : Window
             driveRefreshTimer.Start();
             await Model.RefreshDrivesAsync();
         };
-        Closed += (_, _) => driveRefreshTimer.Stop();
+        Closed += (_, _) =>
+        {
+            driveRefreshTimer.Stop();
+            if (SettingsContent.Content is SettingsView view) view.CancelUpdateCheck();
+        };
         Map.NodeSelected += node =>
         {
             UsageGrid.SelectedItem = Model.Rows.FirstOrDefault(row => row.Node == node);
@@ -116,7 +126,7 @@ public partial class MainWindow : Window
             openWithDoubleClick = updated.OpenWithDoubleClick;
             startScanningOnOpen = updated.StartScanningOnOpen;
             ApplyTheme(updated.Theme);
-        });
+        }, appVersion, updateChecker, launchReleases);
     }
 
     private void MainNavigation_SelectionChanged(object sender, SelectionChangedEventArgs e)

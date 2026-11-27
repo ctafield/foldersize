@@ -397,7 +397,7 @@ public sealed class InterfaceTests
     {
         var launches = new List<ProcessStartInfo>();
         var window = new MainWindow(new ThemeSettingsStore(), AppTheme.Light,
-            launchDiskCleanup: launches.Add) { Width = width, Height = 640 };
+            launchDiskCleanup: launches.Add, updateChecker: TestUpdates.NoUpdates) { Width = width, Height = 640 };
         try
         {
             window.Show();
@@ -439,7 +439,8 @@ public sealed class InterfaceTests
     [InlineData(820, 56)]
     public Task LeftNavigationSwitchesExistingViewsAndFitsTheWindow(double width, double paneWidth) => Sta.Run(async () =>
     {
-        var window = new MainWindow { Width = width, Height = 640 };
+        var window = new MainWindow(new ThemeSettingsStore(), AppTheme.System, updateChecker: TestUpdates.NoUpdates)
+        { Width = width, Height = 640 };
         try
         {
             window.Show();
@@ -509,7 +510,8 @@ public sealed class InterfaceTests
         {
             var preferences = store.LoadSettings();
             var window = new MainWindow(store, preferences.Theme, preferences.OpenWithDoubleClick,
-                includeSubfolders: preferences.IncludeSubfolders, startScanningOnOpen: preferences.StartScanningOnOpen);
+                includeSubfolders: preferences.IncludeSubfolders, startScanningOnOpen: preferences.StartScanningOnOpen,
+                updateChecker: TestUpdates.NoUpdates);
             try
             {
                 window.Show();
@@ -627,7 +629,7 @@ public sealed class InterfaceTests
         var path = Path.Combine(folder.Root, "settings.json");
         var store = new ThemeSettingsStore(path);
         store.Save(AppTheme.Light);
-        var window = new MainWindow(store, store.Load());
+        var window = new MainWindow(store, store.Load(), updateChecker: TestUpdates.NoUpdates);
         try
         {
             window.Show();
@@ -652,7 +654,7 @@ public sealed class InterfaceTests
         finally { window.Close(); }
 
         var restoredStore = new ThemeSettingsStore(path);
-        var reopened = new MainWindow(restoredStore, restoredStore.Load());
+        var reopened = new MainWindow(restoredStore, restoredStore.Load(), updateChecker: TestUpdates.NoUpdates);
         try
         {
             reopened.Show();
