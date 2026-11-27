@@ -53,11 +53,46 @@ public sealed class DuplicateRow(int groupNumber, DuplicateFile file, int copies
 
 public sealed class MainViewModel : Observable
 {
+    private readonly Func<IReadOnlyList<DriveRow>> readDrives;
+    private bool refreshingDrives;
+    private IReadOnlyList<DriveRow> drives = [];
+    private string driveStatus = "";
+    public IReadOnlyList<DriveRow> Drives { get => drives; private set => Set(ref drives, value); }
+    public string DriveStatus { get => driveStatus; private set => Set(ref driveStatus, value); }
     public RenameViewModel Rename { get; }
-    public MainViewModel(RenameStore? renameStore = null)
+    public MainViewModel(RenameStore? renameStore = null, Func<IReadOnlyList<DriveRow>>? readDrives = null)
     {
+        this.readDrives = readDrives ?? DriveRow.ReadAll;
         Rename = new(renameStore ?? new RenameStore(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FolderSize")));
+    }
+
+    public async Task RefreshDrivesAsync()
+    {
+        if (refreshingDrives) return;
+        refreshingDrives = true;
+        try
+        {
+            Drives = await Task.Run(readDrives);
+            DriveStatus = Drives.Count == 0 ? "No drives found." : "";
+        }
+        catch (Exception ex) when (FileErrors.IsExpected(ex))
+        {
+            Drives = [];
+            DriveStatus = $"Could not read drives: {ex.Message}";
+        }
+        finally { refreshingDrives = false; }
+    }
+
+    public async Task ScanDriveAsync(DriveRow drive)
+    {
+        if (Busy) return;
+        if (!drive.CanScan)
+        {
+            Status = $"Could not scan {drive.Path}: {drive.SpaceText}";
+            return;
+        }
+        if (SelectFolder(drive.Path)) await ScanAsync();
     }
 
     private string folderPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

@@ -207,7 +207,7 @@
                 </ListBox.Template>
                 <ListBox.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <DockPanel LastChildFill="False"/>
+                        <DockPanel LastChildFill="True"/>
                     </ItemsPanelTemplate>
                 </ListBox.ItemsPanel>
                 <ListBoxItem ToolTip="Space usage" AutomationProperties.Name="Space usage">
@@ -293,6 +293,88 @@
                                        Style="{StaticResource NavigationLabel}"/>
                         </Grid>
                     </Button>
+                </ListBoxItem>
+                <ListBoxItem x:Name="DrivesNavigationItem" Focusable="False" MinHeight="0" Padding="0" Margin="0,8,0,8">
+                    <ListBoxItem.Template>
+                        <ControlTemplate TargetType="ListBoxItem">
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                        </ControlTemplate>
+                    </ListBoxItem.Template>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="DrivesHeading" Text="Drives" FontWeight="SemiBold" Margin="12,0,0,0"
+                                       Style="{StaticResource NavigationLabel}"/>
+                            <Button x:Name="RefreshDrivesButton" Grid.Column="1" Click="RefreshDrives_Click"
+                                    Width="32" Height="32" Padding="2" Margin="0,0,4,0"
+                                    ToolTip="Refresh drives" AutomationProperties.Name="Refresh drives">
+                                <TextBlock Text="&#xE72C;" Style="{StaticResource NavigationIcon}" FontSize="16"/>
+                            </Button>
+                        </Grid>
+                        <TextBlock Grid.Row="1" Text="{Binding DriveStatus}" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   Style="{StaticResource NavigationLabel}" Margin="12,0,12,0"/>
+                        <ListBox x:Name="DrivesList" Grid.Row="2" ItemsSource="{Binding Drives}"
+                                 Background="Transparent" BorderThickness="0" IsEnabled="{Binding Idle}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 AutomationProperties.Name="Drives" ToolTip="{Binding DriveStatus}"
+                                 MouseDoubleClick="DrivesList_DoubleClick" KeyDown="DrivesList_KeyDown">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem" BasedOn="{StaticResource NavigationItem}">
+                                    <Setter Property="ToolTip" Value="{Binding ToolTip}"/>
+                                    <Setter Property="ToolTipService.ShowOnDisabled" Value="True"/>
+                                    <Setter Property="AutomationProperties.Name" Value="{Binding ToolTip}"/>
+                                    <Setter Property="IsEnabled" Value="{Binding CanScan}"/>
+                                    <Setter Property="Padding" Value="12,8"/>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="24"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Icon}" Style="{StaticResource NavigationIcon}"/>
+                                        <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Width, ElementName=NavigationPane}" Value="56">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding SpaceText}" FontSize="11" TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                            <ProgressBar Value="{Binding UsedPercent, Mode=OneWay}" Maximum="100" Height="4" Margin="0,5,0,0">
+                                                <ProgressBar.Style>
+                                                    <Style TargetType="ProgressBar">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding CanScan}" Value="False">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ProgressBar.Style>
+                                            </ProgressBar>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
                 </ListBoxItem>
             </ListBox>
         </Border>

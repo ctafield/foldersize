@@ -20,6 +20,150 @@ public sealed class InterfaceTests
     [Theory]
     [InlineData(1240)]
     [InlineData(820)]
+    public Task RefreshDrivesButtonUpdatesStorageWithoutChangingFolderResultsOrView(double width) => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write("file.txt", "123");
+        IReadOnlyList<DriveRow> drives = [new(@"C:\", "Local", DriveType.Fixed, 1000, 250),
+            new(@"D:\", "USB", DriveType.Removable, 1000, 500)];
+        var model = new MainViewModel(readDrives: () => drives) { FolderPath = folder.Root };
+        var window = new MainWindow(new ThemeSettingsStore(), AppTheme.Light, model: model,
+            startScanningOnOpen: false) { Width = width, Height = 640 };
+        try
+        {
+            window.Show();
+            await model.ScanAsync();
+            await model.RefreshDrivesAsync();
+            for (var i = 0; i < 100 && model.Drives.Count == 0; i++) await Task.Delay(10);
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var button = (Button)window.FindName("RefreshDrivesButton");
+            var heading = (TextBlock)window.FindName("DrivesHeading");
+            var pane = (Border)window.FindName("NavigationPane");
+            var bounds = button.TransformToAncestor(pane).TransformBounds(new Rect(button.RenderSize));
+            Assert.True(button.IsVisible);
+            Assert.InRange(bounds.Left, 0, pane.ActualWidth - bounds.Width);
+            if (heading.IsVisible)
+            {
+                var headingBounds = heading.TransformToAncestor(pane).TransformBounds(new Rect(heading.RenderSize));
+                Assert.True(headingBounds.Right <= bounds.Left);
+            }
+            Assert.Equal(2, model.Drives.Count);
+            var current = model.Current;
+            var rows = model.Rows;
+            ((ListBox)window.FindName("MainNavigation")).SelectedIndex = 2;
+            drives = [new(@"C:\", "Local", DriveType.Fixed, 1000, 750),
+                new(@"E:\", "New USB", DriveType.Removable, 2000, 1000)];
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            for (var i = 0; i < 100 && model.Drives[0].FreeBytes != 750; i++) await Task.Delay(10);
+            Assert.Equal(750, model.Drives[0].FreeBytes);
+            Assert.Equal(@"E:\", model.Drives[1].Path);
+            Assert.Same(current, model.Current);
+            Assert.Same(rows, model.Rows);
+            Assert.Equal(folder.Root, model.FolderPath);
+            Assert.Equal(2, ((TabControl)window.FindName("MainSections")).SelectedIndex);
+            Assert.True(model.CanFind);
+        }
+        finally { window.Close(); }
+    });
+
+    [Theory]
+    [InlineData(1240, false)]
+    [InlineData(820, true)]
+    public Task DriveSidebarFitsAndActivationScansWithFileDoubleClickDisabled(double width, bool useKeyboard) => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write("root.txt", "123");
+        folder.Write(@"nested\child.txt", "12345");
+        IReadOnlyList<DriveRow> drives = Enumerable.Range(0, 20)
+            .Select(index => new DriveRow(index == 0 ? folder.Root : $@"{(char)('D' + index)}:\",
+                $"Drive {index}", DriveType.Fixed, 1024 * 1024 * 1024, 256 * 1024 * 1024)).ToArray();
+        var model = new MainViewModel(readDrives: () => drives);
+        var window = new MainWindow(new ThemeSettingsStore(), AppTheme.Light, openWithDoubleClick: false,
+            model: model, includeSubfolders: useKeyboard, startScanningOnOpen: false) { Width = width, Height = 640 };
+        try
+        {
+            window.Show();
+            await model.RefreshDrivesAsync();
+            for (var i = 0; i < 100 && model.Drives.Count == 0; i++) await Task.Delay(10);
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var list = (ListBox)window.FindName("DrivesList");
+            Assert.Equal(20, list.Items.Count);
+            Assert.True(list.ActualHeight > 40);
+            var bounds = list.TransformToAncestor(window).TransformBounds(new Rect(list.RenderSize));
+            var cleanup = (Button)window.FindName("DiskCleanupButton");
+            var cleanupBounds = cleanup.TransformToAncestor(window).TransformBounds(new Rect(cleanup.RenderSize));
+            Assert.True(bounds.Bottom <= cleanupBounds.Top);
+            var viewer = Assert.IsType<ScrollViewer>(VisualTreeHelper.GetChild(
+                VisualTreeHelper.GetChild(list, 0), 0));
+            Assert.True(viewer.ScrollableHeight > 0);
+            var container = Assert.IsType<ListBoxItem>(list.ItemContainerGenerator.ContainerFromIndex(0));
+            var content = Assert.IsType<ContentPresenter>(VisualTreeHelper.GetChild(
+                VisualTreeHelper.GetChild(VisualTreeHelper.GetChild(container, 0), 0), 1));
+            content.ApplyTemplate();
+            var grid = Assert.IsType<Grid>(VisualTreeHelper.GetChild(content, 0));
+            var details = Assert.IsType<StackPanel>(grid.Children[1]);
+            Assert.Equal(width < 1100 ? Visibility.Collapsed : Visibility.Visible, details.Visibility);
+            Assert.Contains($"{768:N2} MiB used", container.ToolTip.ToString());
+            Assert.Contains($"{256:N2} MiB free", container.ToolTip.ToString());
+            Assert.Equal(75, Assert.IsType<ProgressBar>(details.Children[2]).Value);
+            ((ListBox)window.FindName("MainNavigation")).SelectedIndex = 2;
+            list.SelectedIndex = 0;
+            Assert.Equal(2, ((TabControl)window.FindName("MainSections")).SelectedIndex);
+            Assert.False(model.CanFind);
+            if (useKeyboard)
+                list.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window), 0, Key.Enter)
+                { RoutedEvent = Keyboard.KeyDownEvent });
+            else
+                list.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+                { RoutedEvent = Control.MouseDoubleClickEvent, Source = grid });
+            for (var i = 0; i < 200 && !model.CanFind; i++) await Task.Delay(10);
+            Assert.True(model.CanFind, model.Status);
+            Assert.Equal(folder.Root, model.FolderPath);
+            Assert.Equal(folder.Root, model.CurrentPath);
+            Assert.Equal(0, ((TabControl)window.FindName("MainSections")).SelectedIndex);
+            var nested = Assert.Single(model.Rows, row => row.Kind == "Folder");
+            Assert.Equal(useKeyboard, nested.Node.IsScanned);
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
+    public Task DriveRefreshUpdatesCapacityAndReportsUnavailableDrivesWithoutChangingTheScan() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write("file.txt", "123");
+        IReadOnlyList<DriveRow> drives = [new(folder.Root, "Local", DriveType.Fixed, 1000, 250)];
+        var fail = false;
+        var model = new MainViewModel(readDrives: () => fail ? throw new IOException("Drive enumeration failed") : drives)
+        { FolderPath = folder.Root };
+        await model.ScanAsync();
+        var current = model.Current;
+        await model.RefreshDrivesAsync();
+        Assert.Equal(75, Assert.Single(model.Drives).UsedPercent);
+        drives = [new(folder.Root, "Local", DriveType.Fixed, 1000, 500),
+            new(@"Z:\", "", DriveType.Removable, null, null),
+            new(@"Y:\", "", DriveType.Network, null, null, "Unavailable: Access denied")];
+        await model.RefreshDrivesAsync();
+        Assert.Equal(50, model.Drives[0].UsedPercent);
+        Assert.False(model.Drives[1].CanScan);
+        Assert.Contains("no media", model.Drives[1].SpaceText);
+        Assert.Contains("Access denied", model.Drives[2].ToolTip);
+        await model.ScanDriveAsync(model.Drives[1]);
+        Assert.Contains("Could not scan", model.Status);
+        Assert.Same(current, model.Current);
+        fail = true;
+        await model.RefreshDrivesAsync();
+        Assert.Empty(model.Drives);
+        Assert.Contains("Drive enumeration failed", model.DriveStatus);
+        Assert.Same(current, model.Current);
+        Assert.True(model.CanFind);
+    });
+
+    [Theory]
+    [InlineData(1240)]
+    [InlineData(820)]
     public Task DiskCleanupLaunchesWindowsUtilityAboveSettingsWithoutChangingViews(double width) => Sta.Run(async () =>
     {
         var launches = new List<ProcessStartInfo>();

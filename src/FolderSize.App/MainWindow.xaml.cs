@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using FolderSize.Core;
 using Microsoft.Win32;
 
@@ -24,6 +25,7 @@ public partial class MainWindow : Window
     private readonly Action<string> copyToClipboard;
     private readonly Action<ProcessStartInfo> launchDiskCleanup;
     private readonly FolderWebSearch folderWebSearch;
+    private readonly DispatcherTimer driveRefreshTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     public MainViewModel Model { get; }
 
     public MainWindow() : this(new ThemeSettingsStore(), AppTheme.System) { }
@@ -57,6 +59,13 @@ public partial class MainWindow : Window
         AppInfoText.Text = $"Version {version.Split('+')[0]}  |  {copyright}";
         ApplyTheme(theme);
         DataContext = Model;
+        driveRefreshTimer.Tick += async (_, _) => await Model.RefreshDrivesAsync();
+        Loaded += async (_, _) =>
+        {
+            driveRefreshTimer.Start();
+            await Model.RefreshDrivesAsync();
+        };
+        Closed += (_, _) => driveRefreshTimer.Stop();
         Map.NodeSelected += node =>
         {
             UsageGrid.SelectedItem = Model.Rows.FirstOrDefault(row => row.Node == node);
@@ -113,7 +122,8 @@ public partial class MainWindow : Window
     private void MainNavigation_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != MainNavigation || MainSections is null) return;
-        if (MainNavigation.SelectedItem == DiskCleanupNavigationItem)
+        if (MainNavigation.SelectedItem == DiskCleanupNavigationItem ||
+            MainNavigation.SelectedItem == DrivesNavigationItem)
             MainNavigation.SelectedIndex = MainSections.SelectedIndex;
         else if (MainNavigation.SelectedIndex >= 0)
             MainSections.SelectedIndex = MainNavigation.SelectedIndex;
@@ -165,6 +175,25 @@ public partial class MainWindow : Window
     }
 
     private async void Scan_Click(object sender, RoutedEventArgs e) => await Model.ScanAsync();
+    private async void RefreshDrives_Click(object sender, RoutedEventArgs e) => await Model.RefreshDrivesAsync();
+    private async void DrivesList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!Model.Idle || e.ChangedButton != MouseButton.Left) return;
+        if (ItemsControl.ContainerFromElement(DrivesList, e.OriginalSource as DependencyObject)
+            is ListBoxItem { Content: DriveRow { CanScan: true } drive })
+        {
+            e.Handled = true;
+            MainNavigation.SelectedIndex = 0;
+            await Model.ScanDriveAsync(drive);
+        }
+    }
+    private async void DrivesList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || !Model.Idle || DrivesList.SelectedItem is not DriveRow { CanScan: true } drive) return;
+        e.Handled = true;
+        MainNavigation.SelectedIndex = 0;
+        await Model.ScanDriveAsync(drive);
+    }
     private async void Window_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton is not (MouseButton.XButton1 or MouseButton.XButton2)) return;
