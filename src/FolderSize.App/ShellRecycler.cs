@@ -4,37 +4,39 @@ using FolderSize.Core;
 
 namespace FolderSize.App;
 
-public sealed class ShellRecycler(bool allowDirectories = false) : IRecycler
+public sealed class ShellRecycler(bool allowDirectories = false, bool permanentlyDelete = false) : IRecycler
 {
     public void Recycle(string path)
     {
         WindowsFileAccess.EnsureNoLinks(path);
-        var root = Path.GetPathRoot(path) ?? throw new IOException("Cannot determine the file volume.");
-        if (new DriveInfo(root).DriveType != DriveType.Fixed)
-            throw new IOException("Recycling is supported only on local fixed drives. File was not deleted.");
+        EnsureSupportedDrive(GetDriveType(path), permanentlyDelete);
         if (!allowDirectories && (File.GetAttributes(path) & FileAttributes.Directory) != 0)
-            throw new IOException("Only individual files can be recycled.");
+            throw new IOException("Only individual files can be removed.");
 
         IFileOperation? operation = null;
         IShellItem? item = null;
         try
         {
             operation = (IFileOperation)new FileOperation();
-            // RECYCLEONDELETE is required; the sink also refuses a non-recycling delete.
-            operation.SetOperationFlags(0x00080000 | 0x00100000 | 0x0400 | 0x0040 |
-                                        0x0010 | 0x0004 | 0x2000);
+            // Permanent deletion must omit both RECYCLEONDELETE and ALLOWUNDO.
+            operation.SetOperationFlags(0x00100000 | 0x0400 | 0x0010 | 0x0004 | 0x2000 |
+                                        (permanentlyDelete ? 0u : 0x00080000u | 0x0040u));
             var iid = typeof(IShellItem).GUID;
             Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(path, 0, ref iid, out item));
-            var sink = new RecycleSink();
+            var sink = new RecycleSink(permanentlyDelete);
             operation.DeleteItem(item, sink);
             operation.PerformOperations();
             operation.GetAnyOperationsAborted(out var aborted);
-            if (aborted || !sink.Recycled)
-                throw new IOException(sink.Error ?? "Windows did not confirm recycling. No permanent-delete fallback was used.");
+            if (aborted || sink.Error is not null || !(permanentlyDelete ? sink.Deleted : sink.Recycled))
+                throw new IOException(sink.Error ?? (permanentlyDelete
+                    ? "Windows did not confirm permanent deletion. Refresh the scan before retrying."
+                    : "Windows did not confirm recycling. No permanent-delete fallback was used."));
+            // Positive Shell statuses can describe traversal rather than completed removal.
+            if (permanentlyDelete) EnsureRemoved(path);
         }
         catch (COMException ex)
         {
-            throw new IOException($"Windows could not recycle the file: {ex.Message}", ex);
+            throw new IOException($"Windows could not {(permanentlyDelete ? "permanently delete" : "recycle")} the item: {ex.Message}", ex);
         }
         finally
         {
@@ -42,6 +44,34 @@ public sealed class ShellRecycler(bool allowDirectories = false) : IRecycler
             if (operation is not null) Marshal.ReleaseComObject(operation);
         }
     }
+
+    internal static bool DefaultPermanentDeletion(IReadOnlyList<DriveType> driveTypes) =>
+        driveTypes.Count > 0 && driveTypes.All(type => type is DriveType.Removable or DriveType.Network);
+
+    internal static void EnsureRemoved(string path)
+    {
+        try { File.GetAttributes(path); }
+        catch (FileNotFoundException) { return; }
+        catch (DirectoryNotFoundException) { return; }
+        throw new IOException("Windows did not remove the item. Refresh the scan before retrying.");
+    }
+
+    internal static DriveType GetDriveType(string path)
+    {
+        var root = Path.GetPathRoot(Path.GetFullPath(path)) ?? throw new IOException("Cannot determine the item volume.");
+        return GetDriveTypeW(root);
+    }
+
+    internal static void EnsureSupportedDrive(DriveType driveType, bool permanentlyDelete = false)
+    {
+        if (driveType is DriveType.Fixed or DriveType.Removable || permanentlyDelete && driveType == DriveType.Network) return;
+        throw new IOException(permanentlyDelete
+            ? "Permanent deletion is supported only on local fixed, removable or network drives. Item was not deleted."
+            : "Recycling is supported only on local fixed or removable drives. Item was not deleted.");
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern DriveType GetDriveTypeW(string root);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHCreateItemFromParsingName(string path, nint context, ref Guid iid,
@@ -110,21 +140,27 @@ public interface IFileOperationProgressSink
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
-public sealed class RecycleSink : IFileOperationProgressSink
+public sealed class RecycleSink(bool permanentlyDelete = false) : IFileOperationProgressSink
 {
     private const int Abort = unchecked((int)0x80004004);
     public bool Recycled { get; private set; }
+    public bool Deleted { get; private set; }
     public string? Error { get; private set; }
     public int PreDeleteItem(uint flags, IShellItem item)
     {
-        if ((flags & 0x80) != 0) return 0;
-        Error = "Windows cannot recycle this file. Permanent deletion was refused.";
+        var recycling = (flags & 0x80) != 0;
+        if (permanentlyDelete ? !recycling : recycling) return 0;
+        Error = permanentlyDelete
+            ? "Windows requested recycling instead of the confirmed permanent deletion. Operation was refused."
+            : "Windows cannot recycle this item. Permanent deletion was refused.";
         return Abort;
     }
     public int PostDeleteItem(uint flags, IShellItem item, int result, IShellItem? created)
     {
-        Recycled = result >= 0 && (flags & 0x80) != 0 && created is not null;
-        if (!Recycled) Error = $"Recycling was not confirmed (0x{result:X8}). Refresh the scan before retrying.";
+        Recycled = !permanentlyDelete && result >= 0 && (flags & 0x80) != 0 && created is not null;
+        Deleted = permanentlyDelete && result >= 0 && (flags & 0x80) == 0 && created is null;
+        if (!(permanentlyDelete ? Deleted : Recycled))
+            Error = $"{(permanentlyDelete ? "Permanent deletion" : "Recycling")} was not confirmed (0x{result:X8}). Refresh the scan before retrying.";
         return 0;
     }
     public int StartOperations() => 0;

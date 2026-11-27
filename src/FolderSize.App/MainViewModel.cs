@@ -588,34 +588,37 @@ public sealed class MainViewModel : Observable
     public bool KeepsOneCopy() => duplicates is not null &&
         DuplicateRows.GroupBy(row => row.GroupNumber).All(group => group.Any(row => !row.Selected));
 
-    public async Task RecycleAsync()
+    public async Task RecycleAsync(bool permanentlyDelete = false)
     {
         if (!CanRecycle || duplicates is null || scan is null) return;
         var selected = SelectedFiles().Select(file => file.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var groups = duplicates.Groups;
-        await RecycleAndRefreshAsync(token => new DuplicateRecycling(new WindowsFileAccess(), new ShellRecycler())
-            .Recycle(groups, selected, token), refreshLargeFiles: false, refreshEmptyFolders: emptyFoldersSearched);
+        await RecycleAndRefreshAsync(token => new DuplicateRecycling(new WindowsFileAccess(), new ShellRecycler(permanentlyDelete: permanentlyDelete))
+            .Recycle(groups, selected, token), refreshLargeFiles: false, refreshEmptyFolders: emptyFoldersSearched,
+            permanentlyDelete: permanentlyDelete);
     }
 
-    public async Task RecycleLargeFilesAsync()
+    public async Task RecycleLargeFilesAsync(bool permanentlyDelete = false)
     {
         if (!CanRecycleLargeFiles) return;
         var files = LargeFiles.Where(row => row.Selected).Select(row => row.Node).ToArray();
-        await RecycleAndRefreshAsync(token => new FileRecycling(new WindowsFileAccess(), new ShellRecycler())
-            .Recycle(files, token), refreshLargeFiles: true, refreshDuplicates: false, refreshEmptyFolders: emptyFoldersSearched);
+        await RecycleAndRefreshAsync(token => new FileRecycling(new WindowsFileAccess(), new ShellRecycler(permanentlyDelete: permanentlyDelete))
+            .Recycle(files, token), refreshLargeFiles: true, refreshDuplicates: false, refreshEmptyFolders: emptyFoldersSearched,
+            permanentlyDelete: permanentlyDelete);
     }
 
-    public Task RecycleEmptyFoldersAsync()
+    public Task RecycleEmptyFoldersAsync(bool permanentlyDelete = false)
     {
         if (!CanRecycleEmptyFolders) return Task.CompletedTask;
-        return RecycleItemsAsync(EmptyFolders.Where(row => row.Selected).Select(row => row.Node).ToArray(), "folders");
+        return RecycleItemsAsync(EmptyFolders.Where(row => row.Selected).Select(row => row.Node).ToArray(), "folders", permanentlyDelete);
     }
 
-    public Task RecycleItemAsync(ScanNode node) => RecycleItemsAsync([node]);
+    public Task RecycleItemAsync(ScanNode node, bool permanentlyDelete = false) => RecycleItemsAsync([node], permanentlyDelete);
 
-    public Task RecycleItemsAsync(IReadOnlyList<ScanNode> nodes) => RecycleItemsAsync(nodes, "files");
+    public Task RecycleItemsAsync(IReadOnlyList<ScanNode> nodes, bool permanentlyDelete = false) =>
+        RecycleItemsAsync(nodes, "files", permanentlyDelete);
 
-    private Task RecycleItemsAsync(IReadOnlyList<ScanNode> nodes, string itemLabel)
+    private Task RecycleItemsAsync(IReadOnlyList<ScanNode> nodes, string itemLabel, bool permanentlyDelete)
     {
         if (!CanFind || scan is null) return Task.CompletedTask;
         if (nodes.Count == 0) return Task.CompletedTask;
@@ -625,8 +628,8 @@ public sealed class MainViewModel : Observable
             while (root.Parent is not null) root = root.Parent;
             if (root != scan.Root || node == scan.Root)
             {
-                Issues = Issues.Append(new FileIssue(node.FullPath, "Item is no longer in the current scan. Scan again before recycling.")).ToArray();
-                Status = "Nothing recycled; see Issues.";
+                Issues = Issues.Append(new FileIssue(node.FullPath, "Item is no longer in the current scan. Scan again before removal.")).ToArray();
+                Status = permanentlyDelete ? "Nothing deleted; see Issues." : "Nothing recycled; see Issues.";
                 return Task.CompletedTask;
             }
         }
@@ -643,13 +646,13 @@ public sealed class MainViewModel : Observable
             var recycled = new List<string>();
             var issues = new List<FileIssue>();
             var access = new WindowsFileAccess();
-            var folders = new FolderRecycling(access, new ShellRecycler(allowDirectories: true));
-            var files = new FileRecycling(access, new ShellRecycler());
+            var folders = new FolderRecycling(access, new ShellRecycler(allowDirectories: true, permanentlyDelete: permanentlyDelete));
+            var files = new FileRecycling(access, new ShellRecycler(permanentlyDelete: permanentlyDelete));
             foreach (var node in targets)
             {
                 if (token.IsCancellationRequested)
                 {
-                    issues.Add(new(node.FullPath, "Recycling cancelled; remaining items were not processed."));
+                    issues.Add(new(node.FullPath, "Removal cancelled; remaining items were not processed."));
                     break;
                 }
                 var result = node.IsDirectory ? folders.Recycle(node, token) : files.Recycle([node], token);
@@ -658,41 +661,45 @@ public sealed class MainViewModel : Observable
             }
             return new RecycleResult(recycled, issues);
         }, refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: duplicates is not null,
-            refreshEmptyFolders: emptyFoldersSearched, itemLabel: itemLabel);
+            refreshEmptyFolders: emptyFoldersSearched, itemLabel: itemLabel, permanentlyDelete: permanentlyDelete);
     }
 
-    public Task RecycleDuplicateAsync(DuplicateRow row)
+    public Task RecycleDuplicateAsync(DuplicateRow row, bool permanentlyDelete = false)
     {
         if (!CanFind || duplicates is null) return Task.CompletedTask;
         if (!DuplicateRows.Contains(row))
         {
-            Issues = Issues.Append(new FileIssue(row.Path, "Duplicate results changed. Find duplicates again before recycling.")).ToArray();
-            Status = "Nothing recycled; see Issues.";
+            Issues = Issues.Append(new FileIssue(row.Path, "Duplicate results changed. Find duplicates again before removal.")).ToArray();
+            Status = permanentlyDelete ? "Nothing deleted; see Issues." : "Nothing recycled; see Issues.";
             return Task.CompletedTask;
         }
         var groups = duplicates.Groups;
-        return RecycleAndRefreshAsync(token => new DuplicateRecycling(new WindowsFileAccess(), new ShellRecycler())
+        return RecycleAndRefreshAsync(token => new DuplicateRecycling(new WindowsFileAccess(), new ShellRecycler(permanentlyDelete: permanentlyDelete))
             .Recycle(groups, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { row.Path }, token),
-            refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: true, refreshEmptyFolders: emptyFoldersSearched);
+            refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: true, refreshEmptyFolders: emptyFoldersSearched,
+            permanentlyDelete: permanentlyDelete);
     }
 
-    private async Task RecycleAndRefreshAsync(Func<CancellationToken, RecycleResult> recycle, bool refreshLargeFiles,
-        bool refreshDuplicates = true, bool refreshEmptyFolders = false, string itemLabel = "files")
+    private async Task RecycleAndRefreshAsync(Func<CancellationToken, RecycleResult> remove, bool refreshLargeFiles,
+        bool refreshDuplicates = true, bool refreshEmptyFolders = false,
+        string itemLabel = "files", bool permanentlyDelete = false)
     {
         if (scan is null) return;
         var rootPath = scan.Root.FullPath;
         var recurse = scannedRecursively;
-        var recycleIssues = new List<FileIssue>();
-        RecycleResult? result = null;
-        var token = Begin("Checking files and recycling selection...");
+        var removalIssues = new List<FileIssue>();
+        var confirmed = 0;
+        var token = Begin(permanentlyDelete ? "Checking items and permanently deleting selection..." :
+            "Checking files and recycling selection...");
         try
         {
-            result = await RunStaAsync(() => recycle(token));
-            recycleIssues.AddRange(result.Issues);
+            var result = await RunStaAsync(() => remove(token));
+            confirmed = result.Recycled.Count;
+            removalIssues.AddRange(result.Issues);
         }
         catch (Exception ex) when (FileErrors.IsExpected(ex) || ex is InvalidOperationException or ArgumentException)
         {
-            recycleIssues.Add(new(rootPath, ex.Message));
+            removalIssues.Add(new(rootPath, ex.Message));
         }
         finally
         {
@@ -708,11 +715,11 @@ public sealed class MainViewModel : Observable
             if (refreshDuplicates) await FindAsync();
             if (refreshEmptyFolders) await FindEmptyFoldersAsync();
         }
-        Issues = Issues.Concat(recycleIssues).ToArray();
-        var confirmed = result?.Recycled.Count ?? 0;
+        Issues = Issues.Concat(removalIssues).ToArray();
         var confirmedLabel = itemLabel == "folders" && confirmed == 1 ? "folder" : itemLabel;
-        Status = $"Recycling finished: {confirmed:N0} {confirmedLabel} confirmed recycled; " +
-                 $"{recycleIssues.Count:N0} recycle issues. " +
+        Status = (permanentlyDelete
+                 ? $"Permanent deletion finished: {confirmed:N0} {confirmedLabel} permanently deleted; {removalIssues.Count:N0} deletion issues. "
+                 : $"Recycling finished: {confirmed:N0} {confirmedLabel} confirmed recycled; {removalIssues.Count:N0} recycle issues. ") +
                  (scan is null ? "Results stale; scan again." : "Results refreshed.");
     }
 

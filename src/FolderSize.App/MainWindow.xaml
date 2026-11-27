@@ -700,7 +700,7 @@
                         </DataGrid.Columns>
                     </DataGrid>
                     <TextBlock Grid.Row="3" Margin="0,14,0,0" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="12" TextWrapping="Wrap"
-                               Text="All but the first copy in each group are selected by default. Review your selection and keep at least one per group. Contents are rechecked before recycling. Local fixed drives only; permanent deletion is never used."/>
+                               Text="All but the first copy in each group are selected by default. Review your selection and keep at least one per group. Contents are rechecked before removal. The confirmation's Permanently Delete checkbox bypasses the Recycle Bin; review it before confirming."/>
                 </Grid>
                 </Border>
             </TabItem>
@@ -759,7 +759,7 @@
                         </DataGrid>
                         <TextBlock Grid.Row="3" Margin="0,12,0,0" FontSize="12"
                                    Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
-                                   Text="Uses the entire completed scan; units use 1024 (1 kb = 1024 bytes). Tick files to recycle, then review the confirmation. No duplicate copy is required or kept. Local fixed drives only; permanent deletion is never used."/>
+                                   Text="Uses the entire completed scan; units use 1024 (1 kb = 1024 bytes). Tick files, then review the confirmation. No duplicate copy is required or kept. The confirmation's Permanently Delete checkbox bypasses the Recycle Bin; review it before confirming."/>
                     </Grid>
                 </Border>
             </TabItem>
@@ -810,7 +810,7 @@
                         </DataGrid>
                         <TextBlock Grid.Row="3" Margin="0,12,0,0" FontSize="12" TextWrapping="Wrap"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
-                                   Text="Only the highest empty folder in each tree is listed; Empty subfolders counts all descendants included when recycling. Any file, including a zero-byte file, means not empty. Contents are rechecked before recycling. Local fixed drives only; permanent deletion is never used."/>
+                                   Text="Only the highest empty folder in each tree is listed; Empty subfolders counts all descendants. Any file, including a zero-byte file, means not empty. Contents are rechecked before removal. The confirmation's Permanently Delete checkbox bypasses the Recycle Bin; review it before confirming."/>
                     </Grid>
                 </Border>
             </TabItem>

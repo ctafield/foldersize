@@ -14,7 +14,7 @@ public sealed class FileRecycling(IFileAccess access, IRecycler recycler)
             var path = file.FullPath;
             if (cancellationToken.IsCancellationRequested)
             {
-                issues.Add(new(path, "Recycling cancelled; remaining files were not processed."));
+                issues.Add(new(path, "Removal cancelled; remaining files were not processed."));
                 break;
             }
             try
@@ -22,7 +22,7 @@ public sealed class FileRecycling(IFileAccess access, IRecycler recycler)
                 using (var lease = access.Open(path))
                 {
                     if (lease.Stamp.Length != file.Size || lease.Stamp.LastWriteUtc != file.LastWriteUtc)
-                        throw new IOException("File changed since the scan; scan again before recycling.");
+                        throw new IOException("File changed since the scan; scan again before removal.");
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 recycler.Recycle(path);
@@ -30,7 +30,7 @@ public sealed class FileRecycling(IFileAccess access, IRecycler recycler)
             }
             catch (OperationCanceledException)
             {
-                issues.Add(new(path, "Recycling cancelled; remaining files were not processed."));
+                issues.Add(new(path, "Removal cancelled; remaining files were not processed."));
                 break;
             }
             catch (Exception ex) when (FileErrors.IsExpected(ex))

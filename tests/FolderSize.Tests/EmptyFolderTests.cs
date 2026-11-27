@@ -15,6 +15,67 @@ namespace FolderSize.Tests;
 public sealed class EmptyFolderTests
 {
     [Fact]
+    [Trait("Category", "RecycleIntegration")]
+    public Task PermanentModeRemovesScannedFolderContentsButPreservesUnselectedPaths() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        var tree = Path.Combine(folder.Root, "tree");
+        folder.Write(@"tree\child\file.txt", "contents");
+        var retained = folder.Write(@"retained\zero.txt", "");
+        var model = new MainViewModel { FolderPath = folder.Root };
+        await model.ScanAsync();
+        var node = model.Rows.Single(row => row.FullPath == tree).Node;
+        await model.RecycleItemsAsync([node, node.Children.Single(), node], permanentlyDelete: true);
+        Assert.Empty(model.Issues);
+        Assert.False(Directory.Exists(tree));
+        Assert.True(File.Exists(retained));
+        Assert.True(Directory.Exists(folder.Root));
+        Assert.Contains("1 files permanently deleted", model.Status);
+    });
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("folder")]
+    [InlineData("missing-child")]
+    public void PermanentDeletionRefusesChangedTreesBeforeRemovingAnyDescendants(string change)
+    {
+        using var folder = new TestFolder();
+        var tree = Path.Combine(folder.Root, "tree");
+        var child = Directory.CreateDirectory(Path.Combine(tree, "child")).FullName;
+        var node = Assert.Single(EmptyFolderFinder.Find(new FolderScanner().Scan(folder.Root, true))).Node;
+        if (change == "file") folder.Write(@"tree\zero.txt", "");
+        else if (change == "folder") Directory.CreateDirectory(Path.Combine(tree, "new-child"));
+        else Directory.Delete(child);
+        var result = new FolderRecycling(new WindowsFileAccess(), new ShellRecycler(allowDirectories: true, permanentlyDelete: true))
+            .Recycle(node);
+        Assert.Empty(result.Recycled);
+        Assert.Contains("changed", Assert.Single(result.Issues).Message);
+        Assert.True(Directory.Exists(tree));
+        if (change != "missing-child") Assert.True(Directory.Exists(child));
+        if (change == "file") Assert.True(File.Exists(Path.Combine(tree, "zero.txt")));
+    }
+
+    [Fact]
+    public void PermanentDeletionRefusesUnscannedFoldersAndHonoursCancellation()
+    {
+        using var folder = new TestFolder();
+        var tree = Directory.CreateDirectory(Path.Combine(folder.Root, @"tree\child")).Parent!.FullName;
+        var shallow = new FolderScanner().Scan(folder.Root, false);
+        var service = new FolderRecycling(new WindowsFileAccess(), new ShellRecycler(allowDirectories: true, permanentlyDelete: true));
+        Assert.Throws<ArgumentException>(() => service.Recycle(shallow.Root));
+        var result = service.Recycle(Assert.Single(shallow.Root.Children));
+        Assert.Empty(result.Recycled);
+        Assert.Contains("recursively", Assert.Single(result.Issues).Message);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var scanned = new FolderScanner().Scan(folder.Root, true);
+        result = service.Recycle(Assert.Single(scanned.Root.Children), cancellation.Token);
+        Assert.Empty(result.Recycled);
+        Assert.Contains("cancelled", Assert.Single(result.Issues).Message);
+        Assert.True(Directory.Exists(Path.Combine(tree, "child")));
+    }
+
+    [Fact]
     public void FindsHighestEmptyTreesAndCountsEveryDescendantWithoutTreatingZeroBytesAsEmpty()
     {
         using var folder = new TestFolder();
@@ -72,6 +133,34 @@ public sealed class EmptyFolderTests
                 .Select(match => Path.GetRelativePath(folder.Root, match.Node.FullPath)));
         }
         finally { Directory.Delete(link); }
+    }
+
+    [Fact]
+    public void PermanentDeletionRefusesFoldersReplacedByJunctions()
+    {
+        using var folder = new TestFolder();
+        var path = Directory.CreateDirectory(Path.Combine(folder.Root, "empty")).FullName;
+        var target = folder.Write(@"target\retained.txt", "retained");
+        var node = Assert.Single(EmptyFolderFinder.Find(new FolderScanner().Scan(folder.Root, true))).Node;
+        Directory.Delete(path);
+        using var process = Process.Start(new ProcessStartInfo("cmd.exe")
+        {
+            Arguments = $"/c mklink /J \"{path}\" \"{Path.GetDirectoryName(target)}\"",
+            CreateNoWindow = true, UseShellExecute = false,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        }) ?? throw new InvalidOperationException("Could not create the test junction.");
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+        try
+        {
+            var result = new FolderRecycling(new WindowsFileAccess(), new ShellRecycler(allowDirectories: true, permanentlyDelete: true))
+                .Recycle(node);
+            Assert.Empty(result.Recycled);
+            Assert.Contains("junction", Assert.Single(result.Issues).Message);
+            Assert.True(File.Exists(target));
+            Assert.True(Directory.Exists(path));
+        }
+        finally { Directory.Delete(path); }
     }
 
     [Theory]
@@ -200,8 +289,10 @@ public sealed class EmptyFolderTests
         finally { window.Close(); }
     });
 
-    [Fact]
-    public Task ConfirmationIncludesDescendantsAndCancelChangesNothing() => Sta.Run(async () =>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ConfirmationIncludesDescendantsAndCancelChangesNothing(bool permanentlyDelete) => Sta.Run(async () =>
     {
         using var folder = new TestFolder();
         var path = Path.Combine(folder.Root, @"tree\child");
@@ -222,26 +313,102 @@ public sealed class EmptyFolderTests
                 try
                 {
                     dialog = Assert.Single(window.OwnedWindows.Cast<Window>());
+                    Assert.Equal("Confirm recycling", dialog.Title);
                     var panel = Assert.IsType<DockPanel>(dialog.Content);
+                    var checkbox = Assert.Single(panel.Children.OfType<CheckBox>());
+                    Assert.Equal("Permanently Delete", checkbox.Content);
+                    Assert.False(checkbox.IsChecked);
+                    checkbox.IsChecked = permanentlyDelete;
                     var heading = panel.Children.OfType<TextBlock>().Single().Text;
                     Assert.Contains("1 empty subfolder", heading);
                     Assert.Contains("empty descendants", heading);
+                    if (permanentlyDelete)
+                    {
+                        Assert.Contains("PERMANENTLY DELETED, not recycled", heading);
+                        Assert.Contains("cannot be undone", heading);
+                    }
                     Assert.Equal(Path.Combine(folder.Root, "tree"),
                         Assert.Single(panel.Children.OfType<ListBox>().Single().Items.Cast<string>()));
                     var cancel = panel.Children.OfType<StackPanel>().Single().Children.OfType<Button>()
                         .Single(button => button.Name == "CancelRecycleButton");
                     Assert.True(cancel.IsDefault);
+                    var confirm = panel.Children.OfType<StackPanel>().Single().Children.OfType<Button>()
+                        .Single(button => button != cancel);
+                    Assert.False(confirm.IsDefault);
                     cancel.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     handled.SetResult();
                 }
                 catch (Exception ex) { handled.SetException(ex); }
                 finally { dialog?.Close(); }
             }));
-            ((Button)window.FindName("RecycleEmptyFoldersButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            ((Button)window.FindName("RecycleEmptyFoldersButton"))
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await handled.Task;
             Assert.True(Directory.Exists(path));
             Assert.True(window.Model.EmptyFolders[0].Selected);
             Assert.False(window.Model.Busy);
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
+    [Trait("Category", "RecycleIntegration")]
+    public Task ConfirmedPermanentDeletionRechecksTreesAndRefreshesOriginalScopeAfterPartialFailure() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        var good = Directory.CreateDirectory(Path.Combine(folder.Root, @"good\child")).Parent!.FullName;
+        var changed = Directory.CreateDirectory(Path.Combine(folder.Root, "changed")).FullName;
+        var retained = Directory.CreateDirectory(Path.Combine(folder.Root, "retained")).FullName;
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            var model = window.Model;
+            model.FolderPath = folder.Root;
+            await model.ScanAsync();
+            await model.FindEmptyFoldersAsync();
+            foreach (var row in model.EmptyFolders) row.Selected = row.Name != "retained";
+            var added = folder.Write(@"changed\zero.txt", "");
+            model.FolderPath = "not the scanned path";
+            model.Recursive = false;
+            var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            model.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(MainViewModel.Status) &&
+                    model.Status.StartsWith("Permanent deletion finished:", StringComparison.Ordinal))
+                    finished.TrySetResult();
+            };
+            _ = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                Window? dialog = null;
+                try
+                {
+                    dialog = Assert.Single(window.OwnedWindows.Cast<Window>());
+                    var panel = Assert.IsType<DockPanel>(dialog.Content);
+                    Assert.Single(panel.Children.OfType<CheckBox>()).IsChecked = true;
+                    Assert.Equal(new[] { changed, good },
+                        panel.Children.OfType<ListBox>().Single().Items.Cast<string>());
+                    panel.Children.OfType<StackPanel>().Single().Children.OfType<Button>()
+                        .Single(button => button.Name == "ConfirmRecycleButton")
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                }
+                catch (Exception ex) { finished.TrySetException(ex); }
+                finally { dialog?.Close(); }
+            }));
+            ((Button)window.FindName("RecycleEmptyFoldersButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await finished.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.False(Directory.Exists(good));
+            Assert.True(File.Exists(added));
+            Assert.True(Directory.Exists(retained));
+            Assert.Equal(retained, Assert.Single(model.EmptyFolders).FullPath);
+            Assert.False(model.EmptyFolders[0].Selected);
+            Assert.False(model.CanRecycleEmptyFolders);
+            Assert.Equal(folder.Root, model.FolderPath);
+            Assert.True(model.Recursive);
+            Assert.Contains(model.Issues, issue => issue.Path == changed && issue.Message.Contains("changed"));
+            Assert.Contains("1 folder permanently deleted", model.Status);
+            Assert.Contains("Results refreshed", model.Status);
+            Assert.False(model.Busy);
         }
         finally { window.Close(); }
     });

@@ -413,24 +413,25 @@ public partial class MainWindow : Window
         if (!Model.CanFind) return;
         if (ContextSelection(sender) is UsageContextSelection selection)
         {
-            var batchGuidance = "The selected files and folders will be moved to the Recycle Bin. No duplicate copy is required or kept.\n" +
-                           "Folders and all of their contents are rechecked against the scan.\n" +
-                           "Local fixed drives only; permanent deletion is never used.";
-            if (ConfirmRecycling(selection.Rows.Select(row => (row.FullPath, row.Bytes)).ToArray(), batchGuidance, "items"))
-                await Model.RecycleItemsAsync(selection.Rows.Select(row => row.Node).ToArray());
+            var batchGuidance = "No duplicate copy is required or kept.\n" +
+                           "Folders and all of their contents are rechecked against the scan.";
+            var batchConfirmation = ConfirmRecycling(selection.Rows.Select(row => (row.FullPath, row.Bytes)).ToArray(), batchGuidance, "items");
+            if (batchConfirmation.Confirmed)
+                await Model.RecycleItemsAsync(selection.Rows.Select(row => row.Node).ToArray(), batchConfirmation.PermanentlyDelete);
             return;
         }
         var item = ContextItem(sender);
         if (ContextPath(item) is not { } path) return;
         var size = item switch { UsageRow row => row.Bytes, DuplicateRow row => row.File.Stamp.Length, _ => 0 };
         var guidance = item is UsageRow { Node.IsDirectory: true }
-            ? "This folder and all of its contents will be moved to the Recycle Bin. Contents are rechecked against the scan."
+            ? "This includes the folder and all of its contents. Contents are rechecked against the scan."
             : item is DuplicateRow
                 ? "A verified duplicate copy will be kept."
-                : "This file will be moved to the Recycle Bin. No duplicate copy is required or kept.";
-        if (!ConfirmRecycling([(path, size)], guidance + "\nLocal fixed drives only; permanent deletion is never used.")) return;
-        if (item is UsageRow rowItem) await Model.RecycleItemAsync(rowItem.Node);
-        else if (item is DuplicateRow duplicate) await Model.RecycleDuplicateAsync(duplicate);
+                : "No duplicate copy is required or kept.";
+        var confirmation = ConfirmRecycling([(path, size)], guidance);
+        if (!confirmation.Confirmed) return;
+        if (item is UsageRow rowItem) await Model.RecycleItemAsync(rowItem.Node, confirmation.PermanentlyDelete);
+        else if (item is DuplicateRow duplicate) await Model.RecycleDuplicateAsync(duplicate, confirmation.PermanentlyDelete);
     }
 
     private async void UsageGrid_KeyDown(object sender, KeyEventArgs e)
@@ -463,9 +464,10 @@ public partial class MainWindow : Window
         }
         var files = Model.SelectedFiles();
         if (files.Count == 0) return;
-        if (ConfirmRecycling(files.Select(file => (file.Path, file.Stamp.Length)).ToArray(),
-                "One copy per group will be kept. Unsupported files will not be permanently deleted."))
-            await Model.RecycleAsync();
+        var confirmation = ConfirmRecycling(files.Select(file => (file.Path, file.Stamp.Length)).ToArray(),
+                "One verified copy per group will be kept.");
+        if (confirmation.Confirmed)
+            await Model.RecycleAsync(confirmation.PermanentlyDelete);
     }
     private async void RecycleLargeFiles_Click(object sender, RoutedEventArgs e)
     {
@@ -473,11 +475,11 @@ public partial class MainWindow : Window
         LargeFilesGrid.CommitEdit(DataGridEditingUnit.Row, true);
         if (!Model.CanRecycleLargeFiles) return;
         var files = Model.LargeFiles.Where(row => row.Selected).Select(row => (row.FullPath, row.Bytes)).ToArray();
-        if (ConfirmRecycling(files,
-                "These files will be moved to the Recycle Bin. No duplicate copy is required or kept.\n" +
-                "Files whose size or modification time changed since the scan will be skipped.\n" +
-                "Local fixed drives only; permanent deletion is never used."))
-            await Model.RecycleLargeFilesAsync();
+        var confirmation = ConfirmRecycling(files,
+                "No duplicate copy is required or kept.\n" +
+                "Files whose size or modification time changed since the scan will be skipped.");
+        if (confirmation.Confirmed)
+            await Model.RecycleLargeFilesAsync(confirmation.PermanentlyDelete);
     }
     private async void RecycleEmptyFolders_Click(object sender, RoutedEventArgs e)
     {
@@ -486,16 +488,29 @@ public partial class MainWindow : Window
         if (!Model.CanRecycleEmptyFolders) return;
         var folders = Model.EmptyFolders.Where(row => row.Selected).ToArray();
         var subfolders = folders.Sum(row => (long)row.EmptySubfolderCount);
-        if (ConfirmRecycling(folders.Select(row => (row.FullPath, 0L)).ToArray(),
+        var confirmation = ConfirmRecycling(folders.Select(row => (row.FullPath, 0L)).ToArray(),
                 $"These top-level folders include {subfolders:N0} empty {(subfolders == 1 ? "subfolder" : "subfolders")}.\n" +
-                "The selected folders and their empty descendants will be moved to the Recycle Bin.\n" +
-                "Folders whose contents changed since scanning will be skipped.\n" +
-                "Local fixed drives only; permanent deletion is never used.", folders.Length == 1 ? "folder" : "folders"))
-            await Model.RecycleEmptyFoldersAsync();
+                "This includes the selected folders and their empty descendants.\n" +
+                "Folders whose contents changed since scanning will be skipped.", folders.Length == 1 ? "folder" : "folders");
+        if (confirmation.Confirmed)
+            await Model.RecycleEmptyFoldersAsync(confirmation.PermanentlyDelete);
     }
 
-    private bool ConfirmRecycling(IReadOnlyList<(string Path, long Size)> files, string guidance, string itemLabel = "files")
+    private (bool Confirmed, bool PermanentlyDelete) ConfirmRecycling(
+        IReadOnlyList<(string Path, long Size)> files, string guidance, string itemLabel = "files")
     {
+        bool defaultPermanentDeletion;
+        try
+        {
+            defaultPermanentDeletion = ShellRecycler.DefaultPermanentDeletion(
+                files.Select(file => ShellRecycler.GetDriveType(file.Path)).ToArray());
+        }
+        catch (Exception ex) when (FileErrors.IsExpected(ex) || ex is ArgumentException or NotSupportedException)
+        {
+            MessageBox.Show(this, $"Could not determine the selected drive types:\n{ex.Message}", "Nothing removed",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return (false, false);
+        }
         var dialog = new Window
         {
             Owner = this, Title = "Confirm recycling", Width = 760, Height = 450,
@@ -506,7 +521,7 @@ public partial class MainWindow : Window
         ApplyTheme(selectedTheme);
         var panel = new DockPanel { Margin = new Thickness(18) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var confirm = new Button { Name = "ConfirmRecycleButton", Content = "Recycle selected", IsDefault = false };
+        var confirm = new Button { Name = "ConfirmRecycleButton", IsDefault = false };
         var cancel = new Button { Name = "CancelRecycleButton", Content = "Cancel", IsCancel = true, IsDefault = true };
         confirm.Click += (_, _) => dialog.DialogResult = true;
         cancel.Click += (_, _) => dialog.DialogResult = false;
@@ -514,16 +529,36 @@ public partial class MainWindow : Window
         buttons.Children.Add(cancel);
         DockPanel.SetDock(buttons, Dock.Bottom);
         panel.Children.Add(buttons);
+        var permanentDeletion = new CheckBox
+        {
+            Name = "PermanentlyDeleteCheckBox", Content = "Permanently Delete", IsChecked = defaultPermanentDeletion,
+            Margin = new Thickness(0, 12, 0, 12),
+            ToolTip = "Applies to every listed item. Bypasses the Recycle Bin and cannot be undone."
+        };
+        DockPanel.SetDock(permanentDeletion, Dock.Bottom);
+        panel.Children.Add(permanentDeletion);
         var heading = new TextBlock
         {
-            Text = $"Recycle {files.Count:N0} {itemLabel} ({SizeText.Format(files.Sum(file => file.Size))} logical)?\n" + guidance,
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12)
         };
+        void UpdateAction()
+        {
+            var permanentlyDelete = permanentDeletion.IsChecked == true;
+            confirm.Content = permanentlyDelete ? "Permanently delete selected" : "Recycle selected";
+            heading.Text = $"{(permanentlyDelete ? "Permanently delete" : "Recycle")} {files.Count:N0} {itemLabel} " +
+                $"({SizeText.Format(files.Sum(file => file.Size))} logical)?\n" + guidance + "\n" +
+                (permanentlyDelete
+                    ? "These items will be PERMANENTLY DELETED, not recycled. This cannot be undone or restored from the Recycle Bin."
+                    : "These items will be moved to the Recycle Bin. Windows recycling support is required; permanent deletion is never used when unticked.");
+        }
+        permanentDeletion.Checked += (_, _) => UpdateAction();
+        permanentDeletion.Unchecked += (_, _) => UpdateAction();
+        UpdateAction();
         DockPanel.SetDock(heading, Dock.Top);
         panel.Children.Add(heading);
         panel.Children.Add(new ListBox { ItemsSource = files.Select(file => file.Path) });
         dialog.Content = panel;
-        return dialog.ShowDialog() == true;
+        return (dialog.ShowDialog() == true, permanentDeletion.IsChecked == true);
     }
     private void Window_Closing(object? sender, CancelEventArgs e)
     {

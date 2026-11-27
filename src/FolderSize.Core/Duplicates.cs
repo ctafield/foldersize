@@ -336,7 +336,7 @@ public sealed class DuplicateRecycling(IFileAccess access, IRecycler recycler)
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    issues.Add(new(candidate.Path, "Recycling cancelled; remaining files were not processed."));
+                    issues.Add(new(candidate.Path, "Removal cancelled; remaining files were not processed."));
                     return new(recycled, issues);
                 }
                 try
@@ -348,13 +348,13 @@ public sealed class DuplicateRecycling(IFileAccess access, IRecycler recycler)
                             !DuplicateFinder.Equal(keeper.Stream, target.Stream, cancellationToken))
                             throw new IOException("Files are no longer independent exact duplicates.");
                     }
-                    // The retained copy stays locked against writes/deletion while the Shell recycles the target.
+                    // The retained copy stays locked against writes/deletion while the Shell removes the target.
                     recycler.Recycle(candidate.Path);
                     recycled.Add(candidate.Path);
                 }
                 catch (OperationCanceledException)
                 {
-                    issues.Add(new(candidate.Path, "Recycling cancelled; remaining files were not processed."));
+                    issues.Add(new(candidate.Path, "Removal cancelled; remaining files were not processed."));
                     return new(recycled, issues);
                 }
                 catch (Exception ex) when (FileErrors.IsExpected(ex))

@@ -97,9 +97,11 @@ public sealed class FileRecyclingTests
         Assert.Contains(model.Issues, issue => issue.Message.Contains("no longer in the current scan"));
     });
 
-    [Fact]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait("Category", "RecycleIntegration")]
-    public Task BatchRecyclingHandlesMixedItemsPartialFailureAndOverlappingSelection() => Sta.Run(async () =>
+    public Task BatchRecyclingHandlesMixedItemsPartialFailureAndOverlappingSelection(bool permanentlyDelete) => Sta.Run(async () =>
     {
         using var folder = new TestFolder();
         var goodFile = folder.Write("good.txt", "good");
@@ -114,7 +116,7 @@ public sealed class FileRecyclingTests
         selected.Add(selected.Single(node => node.Name == "good.txt"));
         File.AppendAllText(changedChild, "changed");
         File.Delete(missingFile);
-        await model.RecycleItemsAsync(selected);
+        await model.RecycleItemsAsync(selected, permanentlyDelete);
         Assert.False(File.Exists(goodFile));
         Assert.False(File.Exists(goodChild));
         Assert.False(Directory.Exists(Path.Combine(folder.Root, "good-folder")));
@@ -124,7 +126,7 @@ public sealed class FileRecyclingTests
         Assert.Equal(2, model.Issues.Count);
         Assert.Contains(model.Issues, issue => issue.Path == missingFile);
         Assert.Contains(model.Issues, issue => issue.Path == Path.Combine(folder.Root, "changed-folder"));
-        Assert.Contains("2 files confirmed recycled", model.Status);
+        Assert.Contains(permanentlyDelete ? "2 files permanently deleted" : "2 files confirmed recycled", model.Status);
         Assert.Contains("Results refreshed", model.Status);
     });
 
@@ -244,9 +246,11 @@ public sealed class FileRecyclingTests
         finally { window.Close(); }
     });
 
-    [Fact]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait("Category", "RecycleIntegration")]
-    public Task RecyclesOnlySelectedFixturesAndRefreshesOriginalScanScopeAfterPartialFailure() => Sta.Run(async () =>
+    public Task RecyclesOnlySelectedFixturesAndRefreshesOriginalScanScopeAfterPartialFailure(bool permanentlyDelete) => Sta.Run(async () =>
     {
         using var folder = new TestFolder();
         var selected = folder.Write("selected", "same");
@@ -262,7 +266,7 @@ public sealed class FileRecyclingTests
         File.Delete(missing);
         model.FolderPath = "an edited, unscanned path";
         model.Recursive = true;
-        await model.RecycleLargeFilesAsync();
+        await model.RecycleLargeFilesAsync(permanentlyDelete);
         Assert.False(File.Exists(selected));
         Assert.True(File.Exists(retained));
         Assert.True(File.Exists(nested));
@@ -273,7 +277,7 @@ public sealed class FileRecyclingTests
         Assert.Equal(folder.Root, model.FolderPath);
         Assert.Empty(model.DuplicateRows);
         Assert.Contains(model.Issues, issue => issue.Path == missing);
-        Assert.Contains("1 files confirmed recycled", model.Status);
+        Assert.Contains(permanentlyDelete ? "1 files permanently deleted" : "1 files confirmed recycled", model.Status);
         Assert.Contains("Results refreshed", model.Status);
     });
 
