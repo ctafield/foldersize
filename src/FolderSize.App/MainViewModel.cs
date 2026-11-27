@@ -472,21 +472,51 @@ public sealed class MainViewModel : Observable
             .Recycle(files, token), refreshLargeFiles: true, refreshDuplicates: false);
     }
 
-    public Task RecycleItemAsync(ScanNode node)
+    public Task RecycleItemAsync(ScanNode node) => RecycleItemsAsync([node]);
+
+    public Task RecycleItemsAsync(IReadOnlyList<ScanNode> nodes)
     {
         if (!CanFind || scan is null) return Task.CompletedTask;
-        var root = node;
-        while (root.Parent is not null) root = root.Parent;
-        if (root != scan.Root || node == scan.Root)
+        if (nodes.Count == 0) return Task.CompletedTask;
+        foreach (var node in nodes)
         {
-            Issues = Issues.Append(new FileIssue(node.FullPath, "Item is no longer in the current scan. Scan again before recycling.")).ToArray();
-            Status = "Nothing recycled; see Issues.";
-            return Task.CompletedTask;
+            var root = node;
+            while (root.Parent is not null) root = root.Parent;
+            if (root != scan.Root || node == scan.Root)
+            {
+                Issues = Issues.Append(new FileIssue(node.FullPath, "Item is no longer in the current scan. Scan again before recycling.")).ToArray();
+                Status = "Nothing recycled; see Issues.";
+                return Task.CompletedTask;
+            }
         }
-        return RecycleAndRefreshAsync(token => node.IsDirectory
-            ? new FolderRecycling(new WindowsFileAccess(), new ShellRecycler(allowDirectories: true)).Recycle(node, token)
-            : new FileRecycling(new WindowsFileAccess(), new ShellRecycler()).Recycle([node], token),
-            refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: duplicates is not null);
+        var selected = nodes.DistinctBy(node => node.FullPath, StringComparer.OrdinalIgnoreCase).ToArray();
+        var selectedNodes = selected.ToHashSet();
+        var targets = selected.Where(node =>
+        {
+            for (var parent = node.Parent; parent is not null; parent = parent.Parent)
+                if (selectedNodes.Contains(parent)) return false;
+            return true;
+        }).ToArray();
+        return RecycleAndRefreshAsync(token =>
+        {
+            var recycled = new List<string>();
+            var issues = new List<FileIssue>();
+            var access = new WindowsFileAccess();
+            var folders = new FolderRecycling(access, new ShellRecycler(allowDirectories: true));
+            var files = new FileRecycling(access, new ShellRecycler());
+            foreach (var node in targets)
+            {
+                if (token.IsCancellationRequested)
+                {
+                    issues.Add(new(node.FullPath, "Recycling cancelled; remaining items were not processed."));
+                    break;
+                }
+                var result = node.IsDirectory ? folders.Recycle(node, token) : files.Recycle([node], token);
+                recycled.AddRange(result.Recycled);
+                issues.AddRange(result.Issues);
+            }
+            return new RecycleResult(recycled, issues);
+        }, refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: duplicates is not null);
     }
 
     public Task RecycleDuplicateAsync(DuplicateRow row)

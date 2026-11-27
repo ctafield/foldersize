@@ -30,6 +30,11 @@
                 <MenuItem.Icon><TextBlock Style="{StaticResource ContextMenuIcon}" Text="&#xE71B;"/></MenuItem.Icon>
             </MenuItem>
             <Separator/>
+            <MenuItem Click="ContextSearchFolder_Click" ToolTipService.ShowOnDisabled="True">
+                <MenuItem.Header><TextBlock Text="Search folder on internet"/></MenuItem.Header>
+                <MenuItem.Icon><TextBlock Style="{StaticResource ContextMenuIcon}" Text="&#xE721;"/></MenuItem.Icon>
+            </MenuItem>
+            <Separator/>
             <MenuItem Header="Send to Recycle Bin" Click="ContextRecycle_Click" ToolTipService.ShowOnDisabled="True">
                 <MenuItem.Icon><TextBlock Style="{StaticResource ContextMenuIcon}" Text="&#xE74D;"/></MenuItem.Icon>
             </MenuItem>
@@ -191,7 +196,7 @@
         <Border x:Name="NavigationPane" Width="216" Margin="0,8,0,0">
             <ListBox x:Name="MainNavigation" Background="Transparent" BorderThickness="0"
                      ItemContainerStyle="{StaticResource NavigationItem}"
-                     SelectedIndex="{Binding SelectedIndex, ElementName=MainSections, Mode=TwoWay}"
+                     SelectedIndex="0" SelectionChanged="MainNavigation_SelectionChanged"
                      AutomationProperties.Name="Main navigation"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      KeyboardNavigation.DirectionalNavigation="Contained">
@@ -241,6 +246,53 @@
                         <TextBlock Text="&#xE713;" Style="{StaticResource NavigationIcon}"/>
                         <TextBlock Text="Settings" Style="{StaticResource NavigationLabel}"/>
                     </StackPanel>
+                </ListBoxItem>
+                <ListBoxItem x:Name="DiskCleanupNavigationItem" DockPanel.Dock="Bottom" Focusable="False">
+                    <ListBoxItem.Template>
+                        <ControlTemplate TargetType="ListBoxItem">
+                            <ContentPresenter/>
+                        </ControlTemplate>
+                    </ListBoxItem.Template>
+                    <Button x:Name="DiskCleanupButton" Click="DiskCleanup_Click"
+                            ToolTip="Launch Disk Clean-up" AutomationProperties.Name="Launch Disk Clean-up"
+                            Padding="12,0" Margin="0,2" MinHeight="44"
+                            HorizontalContentAlignment="Stretch">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}"
+                                                    BorderBrush="Transparent" BorderThickness="1" CornerRadius="6">
+                                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                                  VerticalAlignment="Center"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="ButtonBorder" Property="Background"
+                                                            Value="{DynamicResource SubtleFillColorSecondaryBrush}"/>
+                                                </Trigger>
+                                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                                    <Setter TargetName="ButtonBorder" Property="BorderBrush"
+                                                            Value="{DynamicResource AccentFillColorDefaultBrush}"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </Button.Style>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="24"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="&#xE74D;" Style="{StaticResource NavigationIcon}"/>
+                            <TextBlock Grid.Column="1" Text="Launch Disk Clean-up" TextWrapping="Wrap"
+                                       Style="{StaticResource NavigationLabel}"/>
+                        </Grid>
+                    </Button>
                 </ListBoxItem>
             </ListBox>
         </Border>
@@ -344,7 +396,7 @@
                             <TextBlock Text="Files &amp; folders" Style="{StaticResource SectionHeading}" Margin="4,0,0,12"/>
                         <DataGrid x:Name="UsageGrid" ItemsSource="{Binding Rows}" IsReadOnly="True"
                                   Grid.Row="1"
-                                  SelectionMode="Single" SelectionChanged="UsageGrid_SelectionChanged"
+                                  SelectionMode="Extended" SelectionUnit="FullRow" SelectionChanged="UsageGrid_SelectionChanged"
                                   MouseDoubleClick="UsageGrid_DoubleClick" KeyDown="UsageGrid_KeyDown"
                                   IsEnabled="{Binding Idle}" AutomationProperties.Name="Folder contents">
                             <DataGrid.Columns>

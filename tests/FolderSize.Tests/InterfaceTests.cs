@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Windows;
@@ -16,6 +17,50 @@ namespace FolderSize.Tests;
 
 public sealed class InterfaceTests
 {
+    [Theory]
+    [InlineData(1240)]
+    [InlineData(820)]
+    public Task DiskCleanupLaunchesWindowsUtilityAboveSettingsWithoutChangingViews(double width) => Sta.Run(async () =>
+    {
+        var launches = new List<ProcessStartInfo>();
+        var window = new MainWindow(new ThemeSettingsStore(), AppTheme.Light,
+            launchDiskCleanup: launches.Add) { Width = width, Height = 640 };
+        try
+        {
+            window.Show();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var button = (Button)window.FindName("DiskCleanupButton");
+            var settings = (ListBoxItem)window.FindName("SettingsNavigationItem");
+            var navigation = (ListBox)window.FindName("MainNavigation");
+            var sections = (TabControl)window.FindName("MainSections");
+            var bounds = button.TransformToAncestor(window).TransformBounds(new Rect(button.RenderSize));
+            var settingsBounds = settings.TransformToAncestor(window).TransformBounds(new Rect(settings.RenderSize));
+            Assert.True(button.IsVisible);
+            Assert.True(bounds.Bottom <= settingsBounds.Top);
+            Assert.True(bounds.Width > 24);
+            for (var index = 0; index < sections.Items.Count; index++)
+            {
+                navigation.SelectedIndex = index;
+                button.Focus();
+                button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                Assert.Equal(index, sections.SelectedIndex);
+                Assert.Equal(index, navigation.SelectedIndex);
+                ((ListBoxItem)window.FindName("DiskCleanupNavigationItem")).IsSelected = true;
+                Assert.Equal(index, sections.SelectedIndex);
+                Assert.Equal(index, navigation.SelectedIndex);
+            }
+            Assert.Equal(sections.Items.Count, launches.Count);
+            Assert.All(launches, info =>
+            {
+                Assert.Equal(Path.Combine(Environment.SystemDirectory, "cleanmgr.exe"), info.FileName);
+                Assert.True(info.UseShellExecute);
+                Assert.Empty(info.Arguments);
+                Assert.Empty(info.Verb);
+            });
+        }
+        finally { window.Close(); }
+    });
+
     [Theory]
     [InlineData(1240, 216)]
     [InlineData(820, 56)]

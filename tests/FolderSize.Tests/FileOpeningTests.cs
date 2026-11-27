@@ -11,6 +11,80 @@ namespace FolderSize.Tests;
 public sealed class FileOpeningTests
 {
     [Theory]
+    [InlineData("msedge.exe")]
+    [InlineData("chrome.exe")]
+    [InlineData("brave.exe")]
+    [InlineData("opera.exe")]
+    [InlineData("vivaldi.exe")]
+    [InlineData("chromium.exe")]
+    [InlineData("firefox.exe")]
+    public void FolderSearchUsesTheBrowserDefaultSearchEngineAndKeepsTheQueryInOneArgument(string executable)
+    {
+        var browser = Path.Combine(@"C:\Program Files\Test Browser", executable);
+        ProcessStartInfo? launched = null;
+        new FolderWebSearch(() => browser, info => launched = info).Search("Cache_Data & settings + backups");
+        Assert.NotNull(launched);
+        Assert.Equal(browser, launched.FileName);
+        Assert.False(launched.UseShellExecute);
+        Assert.Empty(launched.Arguments);
+        Assert.Equal(executable == "firefox.exe"
+                ? new[] { "-search", "Cache_Data & settings + backups folder" }
+                : new[] { "? Cache_Data & settings + backups folder" },
+            launched.ArgumentList);
+    }
+
+    [Fact]
+    public void FolderSearchReportsUnsupportedBrowsersAndLaunchFailuresWithoutSwitchingSearchEngines()
+    {
+        var unsupported = new FolderWebSearch(() => @"C:\Browser\unsupported.exe",
+            _ => Assert.Fail("Unsupported browsers must not be launched."));
+        Assert.Throws<NotSupportedException>(() => unsupported.Search("cache"));
+        var failing = new FolderWebSearch(() => @"C:\Browser\chrome.exe",
+            _ => throw new System.ComponentModel.Win32Exception("Browser launch failed."));
+        Assert.Throws<System.ComponentModel.Win32Exception>(() => failing.Search("cache"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task FolderSearchMenuUsesOnlyTheRightClickedFolderNameAndWorksWithoutARecursiveScan(bool recursive) => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        folder.Write(@"Cache_Data & settings\child.txt", "child");
+        folder.Write("selected.txt", "selected");
+        var launches = new List<ProcessStartInfo>();
+        var window = new MainWindow(new ThemeSettingsStore(), AppTheme.Light,
+            folderWebSearch: new FolderWebSearch(() => @"C:\Browser\msedge.exe", launches.Add));
+        try
+        {
+            window.Show();
+            window.Model.FolderPath = folder.Root;
+            window.Model.Recursive = recursive;
+            await window.Model.ScanAsync();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var grid = (DataGrid)window.FindName("UsageGrid");
+            foreach (var item in window.Model.Rows) grid.SelectedItems.Add(item);
+            var clicked = window.Model.Rows.Single(row => row.Node.IsDirectory);
+            var row = Assert.IsType<DataGridRow>(grid.ItemContainerGenerator.ContainerFromItem(clicked));
+            var menu = row.ContextMenu;
+            menu.PlacementTarget = row;
+            menu.IsOpen = true;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var search = Assert.IsType<MenuItem>(menu.Items[4]);
+            Assert.Equal("Copy full path", Assert.IsType<MenuItem>(menu.Items[3]).Header);
+            Assert.Equal("Search Cache_Data & settings on internet", Assert.IsType<TextBlock>(search.Header).Text);
+            Assert.True(search.IsEnabled);
+            search.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Equal("? Cache_Data & settings folder", Assert.Single(Assert.Single(launches).ArgumentList));
+            Assert.Equal(2, grid.SelectedItems.Count);
+            Assert.Equal(folder.Root, window.Model.CurrentPath);
+            menu.IsOpen = false;
+        }
+        finally { window.Close(); }
+    });
+
+    [Theory]
     [InlineData("run.EXE")]
     [InlineData("run.cmd")]
     [InlineData("run.ps1")]
@@ -96,12 +170,13 @@ public sealed class FileOpeningTests
             menu.IsOpen = true;
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             Assert.Same(row.Item, grid.SelectedItem);
-            Assert.Equal(6, menu.Items.Count);
+            Assert.Equal(7, menu.Items.Count);
             Assert.IsType<Separator>(menu.Items[1]);
-            Assert.IsType<Separator>(menu.Items[4]);
+            Assert.IsType<Separator>(menu.Items[5]);
             var items = menu.Items.OfType<MenuItem>().ToArray();
-            Assert.Equal(new[] { "Open", "Copy filename", "Copy full path", "Send to Recycle Bin" },
-                items.Select(item => item.Header));
+            Assert.Equal(new[] { "Open", "Copy filename", "Copy full path", "Search folder on internet", "Send to Recycle Bin" },
+                items.Select(item => item.Header is TextBlock label ? label.Text : item.Header));
+            Assert.False(items[3].IsEnabled);
             Assert.All(items, item =>
             {
                 var icon = Assert.IsType<TextBlock>(item.Icon);

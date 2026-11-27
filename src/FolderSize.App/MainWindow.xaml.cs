@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -21,13 +22,16 @@ public partial class MainWindow : Window
     private readonly WindowPlacement? windowPlacement;
     private readonly FileOpener fileOpener;
     private readonly Action<string> copyToClipboard;
+    private readonly Action<ProcessStartInfo> launchDiskCleanup;
+    private readonly FolderWebSearch folderWebSearch;
     public MainViewModel Model { get; }
 
     public MainWindow() : this(new ThemeSettingsStore(), AppTheme.System) { }
 
     public MainWindow(ThemeSettingsStore settingsStore, AppTheme theme, bool openWithDoubleClick = true,
         FileOpener? fileOpener = null, MainViewModel? model = null, bool includeSubfolders = true,
-        bool startScanningOnOpen = true, WindowPlacement? windowPlacement = null, Action<string>? copyToClipboard = null)
+        bool startScanningOnOpen = true, WindowPlacement? windowPlacement = null, Action<string>? copyToClipboard = null,
+        Action<ProcessStartInfo>? launchDiskCleanup = null, FolderWebSearch? folderWebSearch = null)
     {
         this.settingsStore = settingsStore;
         this.openWithDoubleClick = openWithDoubleClick;
@@ -36,6 +40,12 @@ public partial class MainWindow : Window
         this.windowPlacement = windowPlacement;
         this.fileOpener = fileOpener ?? new FileOpener();
         this.copyToClipboard = copyToClipboard ?? Clipboard.SetText;
+        this.folderWebSearch = folderWebSearch ?? new FolderWebSearch();
+        this.launchDiskCleanup = launchDiskCleanup ?? (info =>
+        {
+            using var process = Process.Start(info)
+                ?? throw new InvalidOperationException("Windows did not start Disk Clean-up.");
+        });
         Model = model ?? new MainViewModel();
         Model.Recursive = includeSubfolders;
         InitializeComponent();
@@ -84,7 +94,9 @@ public partial class MainWindow : Window
 
     private void MainSections_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (e.Source != MainSections || SettingsTab?.IsSelected != true) return;
+        if (e.Source != MainSections) return;
+        if (MainNavigation is not null) MainNavigation.SelectedIndex = MainSections.SelectedIndex;
+        if (SettingsTab?.IsSelected != true) return;
         if (SettingsContent.Content is SettingsView view)
         {
             view.LoadSettings(CurrentSettings());
@@ -96,6 +108,33 @@ public partial class MainWindow : Window
             startScanningOnOpen = updated.StartScanningOnOpen;
             ApplyTheme(updated.Theme);
         });
+    }
+
+    private void MainNavigation_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (e.Source != MainNavigation || MainSections is null) return;
+        if (MainNavigation.SelectedItem == DiskCleanupNavigationItem)
+            MainNavigation.SelectedIndex = MainSections.SelectedIndex;
+        else if (MainNavigation.SelectedIndex >= 0)
+            MainSections.SelectedIndex = MainNavigation.SelectedIndex;
+    }
+
+    private void DiskCleanup_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            launchDiskCleanup(new ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.SystemDirectory, "cleanmgr.exe"),
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex) when (FileErrors.IsExpected(ex) ||
+                                   ex is Win32Exception or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            MessageBox.Show(this, $"Could not launch Windows Disk Clean-up.\n\n{ex.Message}",
+                "Disk Clean-up not launched", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void Browse_Click(object sender, RoutedEventArgs e)
@@ -205,10 +244,21 @@ public partial class MainWindow : Window
             menu.IsOpen = false;
             return;
         }
-        if (ItemsControl.ItemsControlFromItemContainer(row) is DataGrid grid) grid.SelectedItem = row.Item;
         menu.Tag = row.Item;
+        if (ItemsControl.ItemsControlFromItemContainer(row) is DataGrid grid)
+        {
+            if (grid != UsageGrid || !grid.SelectedItems.Contains(row.Item)) grid.SelectedItem = row.Item;
+            if (grid == UsageGrid)
+                menu.Tag = new UsageContextSelection((UsageRow)row.Item, grid.SelectedItems.Cast<UsageRow>().ToArray());
+        }
         var items = menu.Items.OfType<MenuItem>().ToArray();
         foreach (var item in items) { item.IsEnabled = true; item.ToolTip = null; }
+        var searchItem = items[3];
+        var searchLabel = (TextBlock)searchItem.Header;
+        searchItem.IsEnabled = row.Item is UsageRow { Node.IsDirectory: true };
+        searchLabel.Text = row.Item is UsageRow { Node.IsDirectory: true } searchFolder
+            ? $"Search {searchFolder.Name} on internet" : "Search folder on internet";
+        if (!searchItem.IsEnabled) searchItem.ToolTip = "Select a folder to search for its name on the internet.";
         if (row.Item is UsageRow { Node.IsDirectory: true } folder)
         {
             items[0].IsEnabled = folder.Node.IsScanned;
@@ -217,10 +267,23 @@ public partial class MainWindow : Window
             if (!items[^1].IsEnabled)
                 items[^1].ToolTip = "Scan this folder recursively and resolve any Issues before recycling it.";
         }
+        if (menu.Tag is UsageContextSelection selection)
+        {
+            items[^1].IsEnabled = Model.CanFind &&
+                selection.Rows.All(selected => !selected.Node.IsDirectory ||
+                    (selected.Node.IsScanned && !selected.Node.HasErrors));
+            if (!items[^1].IsEnabled)
+                items[^1].ToolTip = "Scan the selected folders recursively and resolve any Issues before recycling them.";
+        }
     }
 
-    private static object? ContextItem(object sender) => sender is MenuItem item &&
+    private sealed record UsageContextSelection(UsageRow ClickedRow, IReadOnlyList<UsageRow> Rows);
+
+    private static object? ContextSelection(object sender) => sender is MenuItem item &&
         ItemsControl.ItemsControlFromItemContainer(item) is ContextMenu menu ? menu.Tag : null;
+
+    private static object? ContextItem(object sender) => ContextSelection(sender) is UsageContextSelection selection
+        ? selection.ClickedRow : ContextSelection(sender);
 
     private static string? ContextPath(object? item) => item switch
     {
@@ -240,6 +303,18 @@ public partial class MainWindow : Window
     private void ContextCopyName_Click(object sender, RoutedEventArgs e) => CopyContextPath(sender, filenameOnly: true);
     private void ContextCopyPath_Click(object sender, RoutedEventArgs e) => CopyContextPath(sender, filenameOnly: false);
 
+    private void ContextSearchFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (!Model.Idle || ContextItem(sender) is not UsageRow { Node.IsDirectory: true } folder) return;
+        try { folderWebSearch.Search(folder.Name); }
+        catch (Exception ex) when (FileErrors.IsExpected(ex) ||
+                                   ex is Win32Exception or ExternalException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            MessageBox.Show(this, $"Could not search for the folder on the internet.\n\n{ex.Message}",
+                "Folder search not launched", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void CopyContextPath(object sender, bool filenameOnly)
     {
         if (!Model.Idle || ContextPath(ContextItem(sender)) is not { } path) return;
@@ -254,6 +329,15 @@ public partial class MainWindow : Window
     private async void ContextRecycle_Click(object sender, RoutedEventArgs e)
     {
         if (!Model.CanFind) return;
+        if (ContextSelection(sender) is UsageContextSelection selection)
+        {
+            var batchGuidance = "The selected files and folders will be moved to the Recycle Bin. No duplicate copy is required or kept.\n" +
+                           "Folders and all of their contents are rechecked against the scan.\n" +
+                           "Local fixed drives only; permanent deletion is never used.";
+            if (ConfirmRecycling(selection.Rows.Select(row => (row.FullPath, row.Bytes)).ToArray(), batchGuidance, "items"))
+                await Model.RecycleItemsAsync(selection.Rows.Select(row => row.Node).ToArray());
+            return;
+        }
         var item = ContextItem(sender);
         if (ContextPath(item) is not { } path) return;
         var size = item switch { UsageRow row => row.Bytes, DuplicateRow row => row.File.Stamp.Length, _ => 0 };
@@ -313,7 +397,7 @@ public partial class MainWindow : Window
                 "Local fixed drives only; permanent deletion is never used."))
             await Model.RecycleLargeFilesAsync();
     }
-    private bool ConfirmRecycling(IReadOnlyList<(string Path, long Size)> files, string guidance)
+    private bool ConfirmRecycling(IReadOnlyList<(string Path, long Size)> files, string guidance, string itemLabel = "files")
     {
         var dialog = new Window
         {
@@ -335,7 +419,7 @@ public partial class MainWindow : Window
         panel.Children.Add(buttons);
         var heading = new TextBlock
         {
-            Text = $"Recycle {files.Count:N0} files ({SizeText.Format(files.Sum(file => file.Size))} logical)?\n" + guidance,
+            Text = $"Recycle {files.Count:N0} {itemLabel} ({SizeText.Format(files.Sum(file => file.Size))} logical)?\n" + guidance,
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12)
         };
         DockPanel.SetDock(heading, Dock.Top);

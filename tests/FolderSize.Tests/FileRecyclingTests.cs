@@ -9,6 +9,125 @@ namespace FolderSize.Tests;
 
 public sealed class FileRecyclingTests
 {
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public Task FilesAndFoldersContextMenuPreservesSelectionAndConfirmsTheWholeBatch(bool recursive, bool selectedRow) => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        var selectedFile = folder.Write("selected.txt", "selected");
+        folder.Write(@"selected-folder\child.txt", "child");
+        var unselectedFile = folder.Write("unselected.txt", "unselected");
+        var window = new MainWindow();
+        try
+        {
+            window.Show();
+            window.Model.FolderPath = folder.Root;
+            window.Model.Recursive = recursive;
+            await window.Model.ScanAsync();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var grid = (DataGrid)window.FindName("UsageGrid");
+            var selection = window.Model.Rows.Where(row => row.Name is "selected.txt" or "selected-folder").ToArray();
+            foreach (var item in selection) grid.SelectedItems.Add(item);
+            var clicked = window.Model.Rows.Single(row => row.FullPath == (selectedRow ? selectedFile : unselectedFile));
+            var row = Assert.IsType<DataGridRow>(grid.ItemContainerGenerator.ContainerFromItem(clicked));
+            var menu = row.ContextMenu;
+            menu.PlacementTarget = row;
+            menu.IsOpen = true;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var expected = selectedRow ? selection : [clicked];
+            Assert.Equal(expected.Length, grid.SelectedItems.Count);
+            Assert.All(expected, item => Assert.Contains(item, grid.SelectedItems.Cast<UsageRow>()));
+            var recycle = menu.Items.OfType<MenuItem>().Last();
+            Assert.Equal(recursive || !selectedRow, recycle.IsEnabled);
+            if (!recycle.IsEnabled)
+            {
+                Assert.Contains("recursively", Assert.IsType<string>(recycle.ToolTip));
+                menu.IsOpen = false;
+                return;
+            }
+            var handled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _ = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                Window? dialog = null;
+                try
+                {
+                    dialog = Assert.Single(window.OwnedWindows.Cast<Window>());
+                    var panel = Assert.IsType<DockPanel>(dialog.Content);
+                    var heading = panel.Children.OfType<TextBlock>().Single().Text;
+                    Assert.Contains($"{expected.Length} items", heading);
+                    Assert.Contains(SizeText.Format(expected.Sum(item => item.Bytes)), heading);
+                    Assert.Contains("contents are rechecked", heading);
+                    Assert.Equal(expected.Select(item => item.FullPath),
+                        panel.Children.OfType<ListBox>().Single().Items.Cast<string>());
+                    var cancel = panel.Children.OfType<StackPanel>().Single().Children.OfType<Button>()
+                        .Single(button => button.Name == "CancelRecycleButton");
+                    cancel.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    handled.SetResult();
+                }
+                catch (Exception ex) { handled.SetException(ex); }
+                finally { dialog?.Close(); }
+            }));
+            recycle.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await handled.Task;
+            menu.IsOpen = false;
+            Assert.True(File.Exists(selectedFile));
+            Assert.True(File.Exists(unselectedFile));
+            Assert.True(Directory.Exists(Path.Combine(folder.Root, "selected-folder")));
+            Assert.False(window.Model.Busy);
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
+    public Task BatchRecyclingRejectsStaleSelectionBeforeProcessingAnyItems() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        var retained = folder.Write("retained.txt", "retained");
+        var model = new MainViewModel { FolderPath = folder.Root };
+        await model.ScanAsync();
+        var stale = Assert.Single(model.Rows).Node;
+        await model.ScanAsync();
+        await model.RecycleItemsAsync([Assert.Single(model.Rows).Node, stale]);
+        Assert.True(File.Exists(retained));
+        Assert.Contains("Nothing recycled", model.Status);
+        Assert.Contains(model.Issues, issue => issue.Message.Contains("no longer in the current scan"));
+    });
+
+    [Fact]
+    [Trait("Category", "RecycleIntegration")]
+    public Task BatchRecyclingHandlesMixedItemsPartialFailureAndOverlappingSelection() => Sta.Run(async () =>
+    {
+        using var folder = new TestFolder();
+        var goodFile = folder.Write("good.txt", "good");
+        var goodChild = folder.Write(@"good-folder\child.txt", "child");
+        var changedChild = folder.Write(@"changed-folder\child.txt", "original");
+        var missingFile = folder.Write("missing.txt", "missing");
+        var retained = folder.Write("retained.txt", "retained");
+        var model = new MainViewModel { FolderPath = folder.Root };
+        await model.ScanAsync();
+        var selected = model.Rows.Where(row => row.FullPath != retained).Select(row => row.Node).ToList();
+        selected.Add(selected.Single(node => node.Name == "good-folder").Children.Single());
+        selected.Add(selected.Single(node => node.Name == "good.txt"));
+        File.AppendAllText(changedChild, "changed");
+        File.Delete(missingFile);
+        await model.RecycleItemsAsync(selected);
+        Assert.False(File.Exists(goodFile));
+        Assert.False(File.Exists(goodChild));
+        Assert.False(Directory.Exists(Path.Combine(folder.Root, "good-folder")));
+        Assert.True(File.Exists(changedChild));
+        Assert.True(File.Exists(retained));
+        Assert.Equal(new[] { "changed-folder", "retained.txt" }, model.Rows.Select(row => row.Name).Order());
+        Assert.Equal(2, model.Issues.Count);
+        Assert.Contains(model.Issues, issue => issue.Path == missingFile);
+        Assert.Contains(model.Issues, issue => issue.Path == Path.Combine(folder.Root, "changed-folder"));
+        Assert.Contains("2 files confirmed recycled", model.Status);
+        Assert.Contains("Results refreshed", model.Status);
+    });
+
     [Fact]
     public void RecyclesOnlyUnchangedFilesAndReportsMissingChangedOrRefusedFiles()
     {
