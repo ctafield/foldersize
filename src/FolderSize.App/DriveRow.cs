@@ -10,6 +10,8 @@ public sealed record DriveRow(string Path, string Label, DriveType Type, long? T
     public bool CanScan => TotalBytes.HasValue && FreeBytes.HasValue && Error is null;
     public double UsedPercent => TotalBytes is > 0 && FreeBytes is { } free
         ? (double)(TotalBytes.Value - free) / TotalBytes.Value * 100 : 0;
+    public bool IsLowOnSpace => CanScan && TotalBytes is > 0 && FreeBytes is { } free
+        && free < TotalBytes.Value / 10m;
     public string SpaceText => TotalBytes is { } total && FreeBytes is { } free && Error is null
         ? $"{SizeText.Format(total - free)} used\n{SizeText.Format(free)} free"
         : Error ?? "Not ready (no media)";

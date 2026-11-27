@@ -37,6 +37,26 @@ public sealed class FileOpener(Action<ProcessStartInfo>? launch = null)
         else Process.Start(info);
     }
 
+    public void OpenFolderInExplorer(string path)
+    {
+        path = FolderPaths.Normalize(path);
+        WindowsFileAccess.EnsureNoLinks(path);
+        if ((File.GetAttributes(path) & FileAttributes.Directory) == 0)
+            throw new InvalidOperationException("The path is no longer a folder.");
+        var info = new ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+            UseShellExecute = false
+        };
+        info.ArgumentList.Add(path);
+        if (launch is not null) launch(info);
+        else
+        {
+            using var process = Process.Start(info)
+                ?? throw new InvalidOperationException("Windows did not start File Explorer.");
+        }
+    }
+
     [DllImport("shlwapi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AssocIsDangerous(string association);

@@ -491,7 +491,7 @@ public sealed class RenameInterfaceTests
             window.Show();
             var tab = (TabItem)window.FindName("RenameTab");
             var tabs = (TabControl)ItemsControl.ItemsControlFromItemContainer(tab);
-            Assert.Equal(tabs.Items.IndexOf(window.FindName("LargeFilesTab")) + 1, tabs.Items.IndexOf(tab));
+            Assert.Equal(tabs.Items.IndexOf(window.FindName("EmptyFoldersTab")) + 1, tabs.Items.IndexOf(tab));
             tab.IsSelected = true;
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             var view = (RenameView)window.FindName("RenamePanel");

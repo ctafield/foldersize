@@ -64,6 +64,17 @@ public sealed class DuplicateRow(DuplicateGroupHeader group, DuplicateFile file)
     public bool Selected { get => selected; set => Set(ref selected, value); }
 }
 
+public sealed class EmptyFolderRow(EmptyFolderMatch match) : Observable
+{
+    private bool selected;
+    public ScanNode Node => match.Node;
+    public string Name => Node.Name;
+    public string FullPath => Node.FullPath;
+    public int EmptySubfolderCount => match.EmptySubfolderCount;
+    public UsageRow IconRow { get; } = new(match.Node, 0);
+    public bool Selected { get => selected; set => Set(ref selected, value); }
+}
+
 public sealed class MainViewModel : Observable
 {
     private readonly Func<IReadOnlyList<DriveRow>> readDrives;
@@ -130,6 +141,40 @@ public sealed class MainViewModel : Observable
     private string largeFilesSummary = "Scan a folder, then enter a minimum size and select Show files.";
     private IReadOnlyList<UsageRow> largeFiles = [];
     private int largeFileSelectedCount;
+    private IReadOnlyList<EmptyFolderRow> emptyFolders = [];
+    private int emptyFolderSelectedCount;
+    private bool emptyFoldersSearched;
+    private string emptyFoldersSummary = "Complete a scan with Include subfolders enabled, then select Find empty folders.";
+    public IReadOnlyList<EmptyFolderRow> EmptyFolders
+    {
+        get => emptyFolders;
+        private set
+        {
+            foreach (var row in emptyFolders) row.PropertyChanged -= EmptyFolderSelectionChanged;
+            Set(ref emptyFolders, value);
+            emptyFolderSelectedCount = emptyFolders.Count(row => row.Selected);
+            foreach (var row in emptyFolders) row.PropertyChanged += EmptyFolderSelectionChanged;
+            Changed(nameof(CanRecycleEmptyFolders));
+        }
+    }
+    public string EmptyFoldersSummary { get => emptyFoldersSummary; private set => Set(ref emptyFoldersSummary, value); }
+    public bool CanFindEmptyFolders => CanFind && scannedRecursively;
+    public bool CanRecycleEmptyFolders => CanFindEmptyFolders && emptyFolderSelectedCount > 0;
+
+    private void EmptyFolderSelectionChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (sender is not EmptyFolderRow row || args.PropertyName != nameof(EmptyFolderRow.Selected)) return;
+        emptyFolderSelectedCount += row.Selected ? 1 : -1;
+        Changed(nameof(CanRecycleEmptyFolders));
+    }
+
+    private void ClearEmptyFolders()
+    {
+        EmptyFolders = [];
+        emptyFoldersSearched = false;
+        EmptyFoldersSummary = "Complete a scan with Include subfolders enabled, then select Find empty folders.";
+    }
+
     public string LargeFileSize
     {
         get => largeFileSize;
@@ -215,6 +260,8 @@ public sealed class MainViewModel : Observable
             Changed(nameof(CanFind));
             Changed(nameof(CanRecycle));
             Changed(nameof(CanRecycleLargeFiles));
+            Changed(nameof(CanFindEmptyFolders));
+            Changed(nameof(CanRecycleEmptyFolders));
             Changed(nameof(CanGoBack));
             Changed(nameof(CanGoForward));
         }
@@ -296,6 +343,9 @@ public sealed class MainViewModel : Observable
             Issues = scan.Issues;
             if (historyIndex < 0) RecordNavigation(previousPath);
             await NavigateAsync(scan.Root);
+            EmptyFoldersSummary = recurse
+                ? $"Select Find empty folders to search {scan.Root.FullPath}."
+                : "This scan did not include subfolders. Enable Include subfolders and scan again to find empty folders.";
             Status = $"Scan complete. {scan.FileCount:N0} files. {Issues.Count:N0} issues.";
         }
         catch (OperationCanceledException) { Status = "Scan cancelled; no complete results. Scan again to continue."; }
@@ -385,6 +435,8 @@ public sealed class MainViewModel : Observable
         Status = message;
         Changed(nameof(Summary));
         Changed(nameof(CanFind));
+        Changed(nameof(CanFindEmptyFolders));
+        Changed(nameof(CanRecycleEmptyFolders));
     }
 
     public async Task UpAsync()
@@ -431,19 +483,7 @@ public sealed class MainViewModel : Observable
         var token = Begin("Filtering large files...");
         try
         {
-            var filtered = await Task.Run(() =>
-            {
-                var matches = new List<UsageRow>();
-                foreach (var file in snapshot.Root.Files())
-                {
-                    token.ThrowIfCancellationRequested();
-                    if (file.Size >= minimum) matches.Add(new(file, snapshot.Root.Size));
-                }
-                var sorted = matches.OrderByDescending(row => row.Bytes)
-                    .ThenBy(row => row.FullPath, StringComparer.OrdinalIgnoreCase).ToArray();
-                token.ThrowIfCancellationRequested();
-                return sorted;
-            }, token);
+            var filtered = await Task.Run(() => FilterLargeFiles(snapshot, minimum, token), token);
             token.ThrowIfCancellationRequested();
             LargeFiles = filtered;
             LargeFilesSummary = $"{LargeFiles.Count:N0} files at least {SizeText.Format(minimum)} in {snapshot.Root.FullPath}" +
@@ -455,6 +495,47 @@ public sealed class MainViewModel : Observable
             LargeFiles = [];
             LargeFilesSummary = "Large file search cancelled; select Show files to try again.";
             Status = "Large file search cancelled.";
+        }
+        finally { End(); }
+    }
+
+    internal static UsageRow[] FilterLargeFiles(ScanResult snapshot, long minimum, CancellationToken token = default)
+    {
+        var matches = new List<UsageRow>();
+        foreach (var file in snapshot.Root.Files())
+        {
+            token.ThrowIfCancellationRequested();
+            if (file.Size >= minimum && !RecycleBinPaths.IsWithin(file.FullPath))
+                matches.Add(new(file, snapshot.Root.Size));
+        }
+        var sorted = matches.OrderByDescending(row => row.Bytes)
+            .ThenBy(row => row.FullPath, StringComparer.OrdinalIgnoreCase).ToArray();
+        token.ThrowIfCancellationRequested();
+        return sorted;
+    }
+
+    public async Task FindEmptyFoldersAsync()
+    {
+        if (!CanFindEmptyFolders || scan is null) return;
+        ClearEmptyFolders();
+        var snapshot = scan;
+        var token = Begin("Finding empty folders...");
+        try
+        {
+            var matches = await Task.Run(() => EmptyFolderFinder.Find(snapshot, token)
+                .Select(match => new EmptyFolderRow(match)).ToArray(), token);
+            token.ThrowIfCancellationRequested();
+            EmptyFolders = matches;
+            emptyFoldersSearched = true;
+            EmptyFoldersSummary = $"{matches.Length:N0} top-level empty folders, including " +
+                $"{matches.Sum(row => (long)row.EmptySubfolderCount):N0} empty subfolders in {snapshot.Root.FullPath}.";
+            Status = $"Empty folder search complete. {matches.Length:N0} matching folders.";
+        }
+        catch (OperationCanceledException)
+        {
+            ClearEmptyFolders();
+            EmptyFoldersSummary = "Empty folder search cancelled; select Find empty folders to try again.";
+            Status = "Empty folder search cancelled.";
         }
         finally { End(); }
     }
@@ -513,7 +594,7 @@ public sealed class MainViewModel : Observable
         var selected = SelectedFiles().Select(file => file.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var groups = duplicates.Groups;
         await RecycleAndRefreshAsync(token => new DuplicateRecycling(new WindowsFileAccess(), new ShellRecycler())
-            .Recycle(groups, selected, token), refreshLargeFiles: false);
+            .Recycle(groups, selected, token), refreshLargeFiles: false, refreshEmptyFolders: emptyFoldersSearched);
     }
 
     public async Task RecycleLargeFilesAsync()
@@ -521,12 +602,20 @@ public sealed class MainViewModel : Observable
         if (!CanRecycleLargeFiles) return;
         var files = LargeFiles.Where(row => row.Selected).Select(row => row.Node).ToArray();
         await RecycleAndRefreshAsync(token => new FileRecycling(new WindowsFileAccess(), new ShellRecycler())
-            .Recycle(files, token), refreshLargeFiles: true, refreshDuplicates: false);
+            .Recycle(files, token), refreshLargeFiles: true, refreshDuplicates: false, refreshEmptyFolders: emptyFoldersSearched);
+    }
+
+    public Task RecycleEmptyFoldersAsync()
+    {
+        if (!CanRecycleEmptyFolders) return Task.CompletedTask;
+        return RecycleItemsAsync(EmptyFolders.Where(row => row.Selected).Select(row => row.Node).ToArray(), "folders");
     }
 
     public Task RecycleItemAsync(ScanNode node) => RecycleItemsAsync([node]);
 
-    public Task RecycleItemsAsync(IReadOnlyList<ScanNode> nodes)
+    public Task RecycleItemsAsync(IReadOnlyList<ScanNode> nodes) => RecycleItemsAsync(nodes, "files");
+
+    private Task RecycleItemsAsync(IReadOnlyList<ScanNode> nodes, string itemLabel)
     {
         if (!CanFind || scan is null) return Task.CompletedTask;
         if (nodes.Count == 0) return Task.CompletedTask;
@@ -568,7 +657,8 @@ public sealed class MainViewModel : Observable
                 issues.AddRange(result.Issues);
             }
             return new RecycleResult(recycled, issues);
-        }, refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: duplicates is not null);
+        }, refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: duplicates is not null,
+            refreshEmptyFolders: emptyFoldersSearched, itemLabel: itemLabel);
     }
 
     public Task RecycleDuplicateAsync(DuplicateRow row)
@@ -583,11 +673,11 @@ public sealed class MainViewModel : Observable
         var groups = duplicates.Groups;
         return RecycleAndRefreshAsync(token => new DuplicateRecycling(new WindowsFileAccess(), new ShellRecycler())
             .Recycle(groups, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { row.Path }, token),
-            refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: true);
+            refreshLargeFiles: LargeFiles.Count > 0, refreshDuplicates: true, refreshEmptyFolders: emptyFoldersSearched);
     }
 
     private async Task RecycleAndRefreshAsync(Func<CancellationToken, RecycleResult> recycle, bool refreshLargeFiles,
-        bool refreshDuplicates = true)
+        bool refreshDuplicates = true, bool refreshEmptyFolders = false, string itemLabel = "files")
     {
         if (scan is null) return;
         var rootPath = scan.Root.FullPath;
@@ -616,9 +706,12 @@ public sealed class MainViewModel : Observable
         {
             if (refreshLargeFiles) await FindLargeFilesAsync();
             if (refreshDuplicates) await FindAsync();
+            if (refreshEmptyFolders) await FindEmptyFoldersAsync();
         }
         Issues = Issues.Concat(recycleIssues).ToArray();
-        Status = $"Recycling finished: {result?.Recycled.Count ?? 0:N0} files confirmed recycled; " +
+        var confirmed = result?.Recycled.Count ?? 0;
+        var confirmedLabel = itemLabel == "folders" && confirmed == 1 ? "folder" : itemLabel;
+        Status = $"Recycling finished: {confirmed:N0} {confirmedLabel} confirmed recycled; " +
                  $"{recycleIssues.Count:N0} recycle issues. " +
                  (scan is null ? "Results stale; scan again." : "Results refreshed.");
     }
@@ -627,6 +720,7 @@ public sealed class MainViewModel : Observable
     {
         ClearDuplicates();
         ClearLargeFiles();
+        ClearEmptyFolders();
         scan = null;
         navigationId++;
         Current = null;

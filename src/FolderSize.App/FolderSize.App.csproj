@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="FolderSize.Tests" />
     <ProjectReference Include="..\FolderSize.Core\FolderSize.Core.csproj" />
     <Resource Include="Assets\FolderSize.ico" />
     <Resource Include="Assets\OpenMoji-1F5C3.png" />

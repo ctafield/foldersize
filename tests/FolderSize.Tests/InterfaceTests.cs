@@ -335,6 +335,62 @@ public sealed class InterfaceTests
     });
 
     [Theory]
+    [InlineData(AppTheme.Light)]
+    [InlineData(AppTheme.Dark)]
+    public Task DriveBarsUseBlueAndRedAtTheFreeSpaceBoundaryAndUpdateOnRefresh(AppTheme theme) => Sta.Run(async () =>
+    {
+        IReadOnlyList<DriveRow> drives =
+        [
+            new(@"C:\", "Normal", DriveType.Fixed, 1000, 101),
+            new(@"D:\", "Boundary", DriveType.Fixed, 1000, 100),
+            new(@"E:\", "Low", DriveType.Removable, 1000, 99),
+            new(@"F:\", "Fractional boundary", DriveType.Network, 1001, 100),
+            new(@"Z:\", "", DriveType.Removable, null, null)
+        ];
+        var model = new MainViewModel(readDrives: () => drives);
+        var window = new MainWindow(new ThemeSettingsStore(), theme, model: model, startScanningOnOpen: false);
+        try
+        {
+            window.Show();
+            await model.RefreshDrivesAsync();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            var list = (ListBox)window.FindName("DrivesList");
+            AssertBar(0, "#0078D4");
+            AssertBar(1, "#0078D4");
+            AssertBar(2, "#D13438");
+            AssertBar(3, "#D13438");
+            var unavailable = Assert.IsType<ListBoxItem>(list.ItemContainerGenerator.ContainerFromIndex(4));
+            Assert.Equal(Visibility.Collapsed, Assert.Single(Descendants<ProgressBar>(unavailable)).Visibility);
+
+            drives =
+            [
+                new(@"C:\", "Now low", DriveType.Fixed, 1000, 99),
+                new(@"D:\", "Now normal", DriveType.Fixed, 1000, 101)
+            ];
+            await model.RefreshDrivesAsync();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+            AssertBar(0, "#D13438");
+            AssertBar(1, "#0078D4");
+
+            void AssertBar(int index, string colour)
+            {
+                var container = Assert.IsType<ListBoxItem>(list.ItemContainerGenerator.ContainerFromIndex(index));
+                var bar = Assert.Single(Descendants<ProgressBar>(container));
+                var expected = (Color)ColorConverter.ConvertFromString(colour);
+                Assert.True(
+                    Descendants<System.Windows.Shapes.Shape>(bar).Any(shape =>
+                        shape.Fill is SolidColorBrush brush && brush.Color == expected) ||
+                    Descendants<Border>(bar).Any(border =>
+                        border.Background is SolidColorBrush brush && brush.Color == expected),
+                    $"Drive {index} must render its usage bar in {colour}.");
+            }
+        }
+        finally { window.Close(); }
+    });
+
+    [Theory]
     [InlineData(1240)]
     [InlineData(820)]
     public Task DiskCleanupLaunchesWindowsUtilityAboveSettingsWithoutChangingViews(double width) => Sta.Run(async () =>
@@ -392,7 +448,7 @@ public sealed class InterfaceTests
             var sections = (TabControl)window.FindName("MainSections");
             Assert.Equal(0, navigation.SelectedIndex);
             Assert.Equal(paneWidth, ((Border)window.FindName("NavigationPane")).ActualWidth);
-            var names = new[] { "UsageGrid", "DuplicatesGrid", "LargeFilesGrid", "RenamePanel" };
+            var names = new[] { "UsageGrid", "DuplicatesGrid", "LargeFilesGrid", "EmptyFoldersGrid", "RenamePanel" };
             for (var index = 0; index < sections.Items.Count; index++)
             {
                 navigation.SelectedIndex = index;

@@ -47,6 +47,14 @@
         <Style x:Key="FileRowStyle" TargetType="DataGridRow" BasedOn="{StaticResource DefaultDataGridRowStyle}">
             <Setter Property="ContextMenu" Value="{StaticResource FileContextMenu}"/>
         </Style>
+        <ContextMenu x:Key="EmptyFolderContextMenu" x:Shared="False" Opened="EmptyFolderContextMenu_Opened">
+            <MenuItem Header="Open in Explorer" Click="OpenEmptyFolderInExplorer_Click">
+                <MenuItem.Icon><TextBlock Style="{StaticResource ContextMenuIcon}" Text="&#xE8B7;"/></MenuItem.Icon>
+            </MenuItem>
+        </ContextMenu>
+        <Style x:Key="EmptyFolderRowStyle" TargetType="DataGridRow" BasedOn="{StaticResource DefaultDataGridRowStyle}">
+            <Setter Property="ContextMenu" Value="{StaticResource EmptyFolderContextMenu}"/>
+        </Style>
         <SolidColorBrush x:Key="SecondaryTextBrush" Color="{DynamicResource TextFillColorSecondary}"/>
         <SolidColorBrush x:Key="CardBrush" Color="{DynamicResource CardBackgroundFillColorDefault}"/>
         <SolidColorBrush x:Key="CardBorderBrush" Color="{DynamicResource CardStrokeColorDefault}"/>
@@ -233,6 +241,12 @@
                         <TextBlock Text="Large Files" Style="{StaticResource NavigationLabel}"/>
                     </StackPanel>
                 </ListBoxItem>
+                <ListBoxItem ToolTip="Empty Folders" AutomationProperties.Name="Empty Folders">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8B7;" Style="{StaticResource NavigationIcon}"/>
+                        <TextBlock Text="Empty Folders" Style="{StaticResource NavigationLabel}"/>
+                    </StackPanel>
+                </ListBoxItem>
                 <ListBoxItem ToolTip="Rename" AutomationProperties.Name="Rename">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE8AC;" Style="{StaticResource NavigationIcon}"/>
@@ -366,7 +380,11 @@
                                             <ProgressBar Value="{Binding UsedPercent, Mode=OneWay}" Maximum="100" Height="4" Margin="0,5,0,0">
                                                 <ProgressBar.Style>
                                                     <Style TargetType="ProgressBar">
+                                                        <Setter Property="Foreground" Value="#0078D4"/>
                                                         <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsLowOnSpace}" Value="True">
+                                                                <Setter Property="Foreground" Value="#D13438"/>
+                                                            </DataTrigger>
                                                             <DataTrigger Binding="{Binding CanScan}" Value="False">
                                                                 <Setter Property="Visibility" Value="Collapsed"/>
                                                             </DataTrigger>
@@ -742,6 +760,57 @@
                         <TextBlock Grid.Row="3" Margin="0,12,0,0" FontSize="12"
                                    Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
                                    Text="Uses the entire completed scan; units use 1024 (1 kb = 1024 bytes). Tick files to recycle, then review the confirmation. No duplicate copy is required or kept. Local fixed drives only; permanent deletion is never used."/>
+                    </Grid>
+                </Border>
+            </TabItem>
+            <TabItem x:Name="EmptyFoldersTab" Header="Empty Folders">
+                <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <WrapPanel Margin="0,0,0,12">
+                            <Button x:Name="FindEmptyFoldersButton" Content="Find empty folders"
+                                    Click="FindEmptyFolders_Click" IsEnabled="{Binding CanFindEmptyFolders}"
+                                    Style="{StaticResource PrimaryButton}"/>
+                            <Button x:Name="SelectAllEmptyFoldersButton" Content="Select All"
+                                    Click="SelectAllEmptyFolders_Click" IsEnabled="{Binding CanFindEmptyFolders}"/>
+                            <Button x:Name="InvertEmptyFoldersSelectionButton" Content="Invert Selection"
+                                    Click="InvertEmptyFoldersSelection_Click" IsEnabled="{Binding CanFindEmptyFolders}"/>
+                            <Button x:Name="RecycleEmptyFoldersButton" Content="Recycle selected..."
+                                    Click="RecycleEmptyFolders_Click" IsEnabled="{Binding CanRecycleEmptyFolders}"/>
+                        </WrapPanel>
+                        <TextBlock Grid.Row="1" Text="{Binding EmptyFoldersSummary}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   AutomationProperties.LiveSetting="Polite"/>
+                        <DataGrid x:Name="EmptyFoldersGrid" Grid.Row="2" ItemsSource="{Binding EmptyFolders}"
+                                  RowStyle="{StaticResource EmptyFolderRowStyle}"
+                                  IsEnabled="{Binding Idle}" AutomationProperties.Name="Empty folder trees"
+                                  MouseDoubleClick="EmptyFoldersGrid_DoubleClick" KeyDown="EmptyFoldersGrid_KeyDown">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Recycle"
+                                    Binding="{Binding Selected, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                                <DataGridTemplateColumn Header="Name" SortMemberPath="Name" Width="180" IsReadOnly="True">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <DockPanel Margin="4,0" VerticalAlignment="Center">
+                                                <local:FileTypeIcon Row="{Binding IconRow}" Margin="0,0,8,0"/>
+                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="Full path" Binding="{Binding FullPath}" Width="*" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Empty subfolders" SortMemberPath="EmptySubfolderCount"
+                                    Binding="{Binding EmptySubfolderCount, StringFormat={}{0:N0}}" Width="140" IsReadOnly="True"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Grid.Row="3" Margin="0,12,0,0" FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   Text="Only the highest empty folder in each tree is listed; Empty subfolders counts all descendants included when recycling. Any file, including a zero-byte file, means not empty. Contents are rechecked before recycling. Local fixed drives only; permanent deletion is never used."/>
                     </Grid>
                 </Border>
             </TabItem>

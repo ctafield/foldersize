@@ -210,6 +210,59 @@ public partial class MainWindow : Window
     private async void Root_Click(object sender, RoutedEventArgs e) => await Model.RootAsync();
     private async void Find_Click(object sender, RoutedEventArgs e) => await Model.FindAsync();
     private async void ShowLargeFiles_Click(object sender, RoutedEventArgs e) => await Model.FindLargeFilesAsync();
+    private async void FindEmptyFolders_Click(object sender, RoutedEventArgs e) => await Model.FindEmptyFoldersAsync();
+    private void SelectAllEmptyFolders_Click(object sender, RoutedEventArgs e) => ChangeEmptyFolderSelection(invert: false);
+    private void InvertEmptyFoldersSelection_Click(object sender, RoutedEventArgs e) => ChangeEmptyFolderSelection(invert: true);
+    private void ChangeEmptyFolderSelection(bool invert)
+    {
+        if (!Model.Idle) return;
+        EmptyFoldersGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+        EmptyFoldersGrid.CommitEdit(DataGridEditingUnit.Row, true);
+        foreach (var row in Model.EmptyFolders) row.Selected = invert ? !row.Selected : true;
+    }
+    private void EmptyFolderContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu) return;
+        if (!Model.Idle || menu.PlacementTarget is not DataGridRow { Item: EmptyFolderRow row } ||
+            !Model.EmptyFolders.Contains(row))
+        {
+            menu.IsOpen = false;
+            return;
+        }
+        menu.Tag = row;
+        EmptyFoldersGrid.SelectedItem = row;
+    }
+    private void OpenEmptyFolderInExplorer_Click(object sender, RoutedEventArgs e)
+    {
+        if (!Model.Idle || ContextItem(sender) is not EmptyFolderRow row) return;
+        try { fileOpener.OpenFolderInExplorer(row.FullPath); }
+        catch (Exception ex) when (FileErrors.IsExpected(ex) ||
+                                   ex is Win32Exception or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            MessageBox.Show(this, $"Could not open the folder in File Explorer:\n{row.FullPath}\n\n{ex.Message}",
+                "Folder not opened", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+    private async void EmptyFoldersGrid_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!Model.Idle || e.ChangedButton != MouseButton.Left) return;
+        if (ItemsControl.ContainerFromElement(EmptyFoldersGrid, e.OriginalSource as DependencyObject)
+            is DataGridRow { Item: EmptyFolderRow row })
+        {
+            for (var source = e.OriginalSource as DependencyObject; source is not null && source != EmptyFoldersGrid;
+                 source = source is Visual ? VisualTreeHelper.GetParent(source) : LogicalTreeHelper.GetParent(source))
+                if (source is DataGridCell { Column: DataGridCheckBoxColumn }) return;
+            MainNavigation.SelectedIndex = 0;
+            await Model.NavigateAsync(row.Node);
+        }
+    }
+    private async void EmptyFoldersGrid_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || !Model.Idle || EmptyFoldersGrid.SelectedItem is not EmptyFolderRow row) return;
+        e.Handled = true;
+        MainNavigation.SelectedIndex = 0;
+        await Model.NavigateAsync(row.Node);
+    }
     private async void LargeFileSize_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && Model.CanFind)
@@ -426,6 +479,21 @@ public partial class MainWindow : Window
                 "Local fixed drives only; permanent deletion is never used."))
             await Model.RecycleLargeFilesAsync();
     }
+    private async void RecycleEmptyFolders_Click(object sender, RoutedEventArgs e)
+    {
+        EmptyFoldersGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+        EmptyFoldersGrid.CommitEdit(DataGridEditingUnit.Row, true);
+        if (!Model.CanRecycleEmptyFolders) return;
+        var folders = Model.EmptyFolders.Where(row => row.Selected).ToArray();
+        var subfolders = folders.Sum(row => (long)row.EmptySubfolderCount);
+        if (ConfirmRecycling(folders.Select(row => (row.FullPath, 0L)).ToArray(),
+                $"These top-level folders include {subfolders:N0} empty {(subfolders == 1 ? "subfolder" : "subfolders")}.\n" +
+                "The selected folders and their empty descendants will be moved to the Recycle Bin.\n" +
+                "Folders whose contents changed since scanning will be skipped.\n" +
+                "Local fixed drives only; permanent deletion is never used.", folders.Length == 1 ? "folder" : "folders"))
+            await Model.RecycleEmptyFoldersAsync();
+    }
+
     private bool ConfirmRecycling(IReadOnlyList<(string Path, long Size)> files, string guidance, string itemLabel = "files")
     {
         var dialog = new Window

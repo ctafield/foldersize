@@ -12,4 +12,8 @@
     <Copyright>Copyright (c) 2026 Chris Field</Copyright>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="FolderSize.Tests" />
+  </ItemGroup>
+
 </Project>
